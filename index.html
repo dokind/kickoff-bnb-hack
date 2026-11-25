@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    The base path the site is served from. `flutter build web --base-href
+    /kickoff-bnb-hack/` fills it for GitHub Pages; it must start and end with
+    a slash. Routes are in the hash (#/r/<launcher>), so the server only ever
+    serves this one page.
+  -->
+  <base href="/kickoff-bnb-hack/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cypher Run: pay a deposit in test USD, check in each day you move, and split the prize. BNB Smart Chain testnet.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Cypher Run">
+  <meta name="theme-color" content="#0A0E11">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Cypher Run</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!--
+    The splash: drawn by the browser at once, so a scanned link never shows a
+    black screen while the app loads. Colours are the app's own (lib/theme/
+    tokens.dart): ink #0A0E11, inkDeep #05080A, slate #17222A, volt #D4FF3A.
+    It is removed on the app's first frame.
+  -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #05080A; }
+    #splash {
+      position: fixed; inset: 0; z-index: 1;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 12px; padding: 0 24px;
+      background: radial-gradient(120% 80% at 50% 20%, #17222A 0%, #0A0E11 55%, #05080A 100%);
+      color: #FFFFFF; text-align: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      transition: opacity 240ms ease-out;
+    }
+    #splash.gone { opacity: 0; pointer-events: none; }
+    #splash h1 { margin: 0; font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+    #splash p { margin: 0; font-size: 16px; line-height: 1.4; color: rgba(255, 255, 255, 0.64); }
+    #splash .track {
+      position: relative; overflow: hidden; width: 160px; height: 2px;
+      margin-top: 20px; border-radius: 1px; background: rgba(255, 255, 255, 0.12);
+    }
+    #splash .track::after {
+      content: ""; position: absolute; top: 0; left: -40%; width: 40%; height: 100%;
+      border-radius: 1px; background: #D4FF3A;
+      animation: splash-run 1.2s ease-in-out infinite;
+    }
+    @keyframes splash-run { from { left: -40%; } to { left: 100%; } }
+    @media (prefers-reduced-motion: reduce) {
+      #splash .track::after { animation: none; left: 30%; }
+    }
+  </style>
+</head>
+<body>
+  <div id="splash" role="status" aria-live="polite">
+    <h1>Cypher Run</h1>
+    <p>Pay in. Show up each day. Split the prize.</p>
+    <div class="track" role="progressbar" aria-label="Loading"></div>
+  </div>
+  <script>
+    // Flutter's engine replaces the viewport tag with one that turns pinch
+    // zoom off (maximum-scale=1.0, user-scalable=no). Put zoom back whenever
+    // it does, so people who need to enlarge the page can.
+    (function () {
+      var open = 'width=device-width, initial-scale=1';
+      function allowZoom() {
+        document.querySelectorAll('meta[name="viewport"]').forEach(function (m) {
+          if (m.getAttribute('content') !== open) m.setAttribute('content', open);
+        });
+      }
+      new MutationObserver(allowZoom).observe(document.head, {
+        childList: true, subtree: true, attributes: true, attributeFilter: ['content']
+      });
+    })();
+    window.addEventListener('flutter-first-frame', function () {
+      var splash = document.getElementById('splash');
+      if (!splash) return;
+      splash.classList.add('gone');
+      setTimeout(function () { splash.remove(); }, 300);
+    }, { once: true });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
