@@ -2,19 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/theme.dart';
+import 'controls.dart';
 import 'glass.dart';
 
-/// One place in the [FloatingTabBar].
+/// One button in the [FloatingTabBar]: a place, or an action.
 class TabItem {
-  const TabItem({required this.icon, required this.label});
+  const TabItem({required this.icon, required this.label, this.action = false});
   final IconData icon;
 
   /// Not drawn: the tooltip and the screen-reader name.
   final String label;
+
+  /// An action (the "+") and not a place: it is never the selected one, and
+  /// every press is passed on.
+  final bool action;
 }
 
-/// The floating glass capsule at the bottom: one round button per place.
-/// The place you are on is a volt disc with a glow; the others are faint.
+/// The floating glass capsule at the bottom: one round button per place,
+/// and the "+" between them. The place you are on is a volt disc with a
+/// glow; the other places are faint. An action is neither: a ringed disc,
+/// brighter than a place you are not on, never volt. Each button can be
+/// reached and pressed from the keyboard and by a screen reader.
 class FloatingTabBar extends StatelessWidget {
   const FloatingTabBar({
     super.key,
@@ -24,6 +32,8 @@ class FloatingTabBar extends StatelessWidget {
   });
 
   final List<TabItem> items;
+
+  /// The index of the place you are on.
   final int current;
   final ValueChanged<int> onSelect;
 
@@ -41,17 +51,21 @@ class FloatingTabBar extends StatelessWidget {
           children: [
             for (final (i, item) in items.indexed) ...[
               if (i > 0) const SizedBox(width: 10),
-              Tooltip(
-                message: item.label,
-                child: Semantics(
-                  button: true,
-                  selected: i == current,
-                  label: item.label,
-                  excludeSemantics: true,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      if (i == current) return;
+              () {
+                final here = !item.action && i == current;
+                return Tooltip(
+                  message: item.label,
+                  // The button says its own name.
+                  excludeFromSemantics: true,
+                  child: Pressable(
+                    label: item.label,
+                    // A place says whether you are on it; an action has no
+                    // such state.
+                    selected: item.action ? null : here,
+                    shape: const CircleBorder(),
+                    ink: here ? c.onVolt : c.text,
+                    onPressed: () {
+                      if (here) return;
                       HapticFeedback.selectionClick();
                       onSelect(i);
                     },
@@ -62,11 +76,16 @@ class FloatingTabBar extends StatelessWidget {
                       height: 56,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: i == current
+                        color: here
                             ? c.volt
-                            : Colors.white.withValues(alpha: 0.06),
+                            : Colors.white.withValues(
+                                alpha: item.action ? 0.12 : 0.06,
+                              ),
+                        border: item.action
+                            ? Border.all(color: c.text3, width: 1.5)
+                            : null,
                         boxShadow: [
-                          if (i == current)
+                          if (here)
                             BoxShadow(
                               color: c.volt.withValues(alpha: 0.5),
                               blurRadius: 12,
@@ -75,13 +94,13 @@ class FloatingTabBar extends StatelessWidget {
                       ),
                       child: Icon(
                         item.icon,
-                        size: 22,
-                        color: i == current ? c.onVolt : c.text,
+                        size: item.action ? 26 : 22,
+                        color: here ? c.onVolt : c.text,
                       ),
                     ),
                   ),
-                ),
-              ),
+                );
+              }(),
             ],
           ],
         ),

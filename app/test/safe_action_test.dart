@@ -629,15 +629,17 @@ void main() {
       final state = await makeState(server: server, chain: chain);
       await pumpHome(tester, state);
 
-      await tester.tap(action('Sponsor the launch pool'));
+      await tester.tap(action('Sponsor the token pool'));
       await settle(tester, 14);
       expect(namedIn(tester, SponsorSheet), 'Demo Day');
       state.select(launcherB);
       await settle(tester, 14);
-      await tester.tap(action('Add to the launch pool'));
+      await tester.tap(action('Add to the token pool'));
       await settle(tester, 14);
       expect(chain.asked, [launcher]);
       expect(chain.calls, ['mint 600', 'sponsor 600']);
+      // The sheet's own words for it, as on its title and its button.
+      expect(bannerNote.value!.text, '600 USD added to the token pool.');
     });
 
     testWidgets('a press that began on one round never lands on another', (

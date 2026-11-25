@@ -236,7 +236,7 @@ class _CheckInSheetState extends State<CheckInSheet> {
         ],
         PillButton(
           label: _error != null
-              ? 'Retry'
+              ? 'Try again'
               : pending
               ? 'Finish check-in'
               : 'Check in',

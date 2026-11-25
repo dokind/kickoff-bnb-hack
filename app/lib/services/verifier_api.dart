@@ -78,7 +78,7 @@ class Round {
   /// The fixed deposit, in base units of the quote token.
   final BigInt deposit;
 
-  /// The share of each deposit that goes to the launch pool, in basis
+  /// The share of each deposit that goes to the token pool, in basis
   /// points. The rest is the prize.
   final int liquidityBps;
 
@@ -89,7 +89,7 @@ class Round {
   final BigInt totalDeposits;
   final BigInt totalSponsored;
 
-  /// What would seed the launch pool now.
+  /// What would seed the token pool now.
   final BigInt poolQuoteNow;
 
   /// The prize so far: the deposits that do not go to the pool.
@@ -171,7 +171,7 @@ class Round {
     'unlisted': unlisted,
   };
 
-  /// The part of one deposit that goes to the launch pool, and the rest.
+  /// The part of one deposit that goes to the token pool, and the rest.
   BigInt get depositToPool =>
       deposit * BigInt.from(liquidityBps) ~/ BigInt.from(10000);
   BigInt get depositToPrize => deposit - depositToPool;

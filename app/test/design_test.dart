@@ -266,7 +266,8 @@ void main() {
               onSelect: (i) => picked = i,
               items: const [
                 TabItem(icon: Icons.grid_view_rounded, label: 'Home'),
-                TabItem(icon: Icons.person, label: 'Account'),
+                TabItem(icon: Icons.add_rounded, label: 'Add', action: true),
+                TabItem(icon: Icons.person, label: 'Wallet'),
               ],
             ),
           ),
@@ -274,8 +275,84 @@ void main() {
       );
       await tester.tap(find.byTooltip('Home'));
       expect(picked, isNull, reason: 'already there');
-      await tester.tap(find.byTooltip('Account'));
-      expect(picked, 1);
+      await tester.tap(find.byTooltip('Wallet'));
+      expect(picked, 2);
+    });
+
+    testWidgets('an action in the tab bar is never the selected one', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      Color? disc(String label) =>
+          (tester
+                      .widget<AnimatedContainer>(
+                        find.descendant(
+                          of: find.byTooltip(label),
+                          matching: find.byType(AnimatedContainer),
+                        ),
+                      )
+                      .decoration!
+                  as BoxDecoration)
+              .color;
+      // Even when the bar is told the action is where you are.
+      for (final current in [0, 1]) {
+        final picked = <int>[];
+        await tester.pumpWidget(
+          inApp(
+            Center(
+              child: FloatingTabBar(
+                current: current,
+                onSelect: picked.add,
+                items: const [
+                  TabItem(icon: Icons.grid_view_rounded, label: 'Home'),
+                  TabItem(icon: Icons.add_rounded, label: 'Add', action: true),
+                  TabItem(icon: Icons.person, label: 'Wallet'),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        // Volt marks where you are; the action is never volt.
+        expect(disc('Add'), isNot(AppColors.dark.volt));
+        expect(
+          disc('Home'),
+          current == 0 ? AppColors.dark.volt : isNot(AppColors.dark.volt),
+        );
+        // A place says whether it is selected; the action has no such state.
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Add')),
+          isSemantics(
+            isButton: true,
+            hasTapAction: true,
+            hasSelectedState: false,
+          ),
+        );
+        expect(
+          tester.getSemantics(find.bySemanticsLabel('Home')),
+          isSemantics(
+            isButton: true,
+            hasTapAction: true,
+            hasSelectedState: true,
+            isSelected: current == 0,
+          ),
+        );
+        // Every press of the action is passed on, as often as it is pressed.
+        await tester.tap(find.byTooltip('Add'));
+        await tester.tap(find.byTooltip('Add'));
+        expect(picked, [1, 1]);
+        // The same 56 disc as the places.
+        expect(
+          tester.getSize(
+            find.descendant(
+              of: find.byTooltip('Add'),
+              matching: find.byType(AnimatedContainer),
+            ),
+          ),
+          const Size(56, 56),
+        );
+      }
+      semantics.dispose();
     });
 
     testWidgets('a message shows in the banner and leaves by itself', (

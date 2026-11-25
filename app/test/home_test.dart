@@ -126,14 +126,14 @@ void main() {
     expect(enabled(tester, 'Launch Morning Movers'), isFalse);
     expect(
       find.text(
-        'The bar is full, but the launch pool is 600 USD short of what Flap '
+        'The bar is full, but the token pool is 600 USD short of what Flap '
         'needs.',
       ),
       findsOneWidget,
     );
-    await tester.tap(action('Sponsor the launch pool'));
+    await tester.tap(action('Sponsor the token pool'));
     await settle(tester, 10);
-    expect(find.text('Sponsor the launch pool'), findsNWidgets(2));
+    expect(find.text('Sponsor the token pool'), findsNWidgets(2));
     // The sheet starts with what is missing.
     expect(
       tester
@@ -142,7 +142,7 @@ void main() {
           .text,
       '600',
     );
-    await tester.tap(action('Add to the launch pool'));
+    await tester.tap(action('Add to the token pool'));
     await settle(tester, 10);
     expect(chain.calls, ['mint 600', 'sponsor 600']);
     expect(enabled(tester, 'Launch Morning Movers'), isTrue);
@@ -261,7 +261,7 @@ void main() {
     // The prize so far, in dot-matrix numerals.
     final list = find.byType(Scrollable).first;
     await tester.scrollUntilVisible(
-      find.text('LAUNCH POOL'),
+      find.text('TOKEN POOL'),
       200,
       scrollable: list,
     );
@@ -270,7 +270,7 @@ void main() {
       tester.widget<DotMatrixText>(find.byType(DotMatrixText)).text,
       '2,100',
     );
-    expect(find.text('LAUNCH POOL'), findsOneWidget);
+    expect(find.text('TOKEN POOL'), findsOneWidget);
     expect(find.text('900'), findsOneWidget);
     expect(find.text('of 1,500 USD Flap needs'), findsOneWidget);
 
@@ -292,12 +292,51 @@ void main() {
     );
   });
 
+  testWidgets('reads again every 20 s, but not while a sheet covers Home', (
+    tester,
+  ) async {
+    final server = FakeServer();
+    final state = await makeState(server: server);
+    await pumpHome(tester, state);
+    int reads() => server.count('GET /rounds');
+
+    var before = reads();
+    await tester.pump(const Duration(seconds: 20));
+    await settle(tester);
+    expect(reads(), before + 1);
+
+    // Under the join sheet Home waits: the sheet reads after its own step.
+    await tester.tap(action('Join Morning Movers · 1,000 USD'));
+    await settle(tester, 10);
+    expect(find.text('Pay the deposit'), findsOneWidget);
+    before = reads();
+    await tester.pump(const Duration(seconds: 41));
+    await settle(tester);
+    expect(reads(), before);
+
+    // Uncovered again, it goes on.
+    Navigator.of(tester.element(find.text('Pay the deposit'))).pop();
+    await settle(tester, 12);
+    expect(find.text('Pay the deposit'), findsNothing);
+    before = reads();
+    await tester.pump(const Duration(seconds: 20));
+    await settle(tester);
+    expect(reads(), before + 1);
+  });
+
   testWidgets('no round open: a card and "Look again"', (tester) async {
     final server = FakeServer()..round = null;
     final state = await makeState(server: server);
     await pumpHome(tester, state);
 
     expect(find.text('NO ROUND\nRIGHT NOW.'), findsOneWidget);
+    // It says what to do next, not to wait.
+    expect(
+      find.text(
+        'Press + to start one, or to open an invite link someone sent you.',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('YOUR STREAK'), findsNothing);
     server.round = roundJson();
     await tester.tap(action('Look again'));
@@ -305,7 +344,7 @@ void main() {
     expect(action('Join Morning Movers · 1,000 USD'), findsOneWidget);
   });
 
-  testWidgets('server unreachable: one sentence and Retry, no host name', (
+  testWidgets('server unreachable: one sentence and Try again, no host name', (
     tester,
   ) async {
     final server = FakeServer()..offline = true;
@@ -318,7 +357,7 @@ void main() {
     expect(find.textContaining('server.test'), findsNothing);
 
     server.offline = false;
-    await tester.tap(action('Retry'));
+    await tester.tap(action('Try again'));
     await settle(tester);
     expect(find.text(VerifierApi.unreachable), findsNothing);
     expect(action('Join Morning Movers · 1,000 USD'), findsOneWidget);

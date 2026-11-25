@@ -5,12 +5,152 @@ import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'glass.dart';
 
+/// What a control is pressed through. A touch, a mouse, the keyboard (Tab
+/// to it, then Enter or Space) and a screen reader all end in [onPressed].
+///
+/// It is one node for a screen reader: [label] with its role and state, and
+/// a tap action of its own. What is drawn inside is not read out a second
+/// time. Reached from a keyboard it draws a ring in [ink], the colour of
+/// the control's own text, just inside its [shape] (outside it when
+/// [ringInset] is negative).
+class Pressable extends StatefulWidget {
+  const Pressable({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    required this.child,
+    this.ink,
+    this.shape = const StadiumBorder(),
+    this.ringInset = 3,
+    this.button = true,
+    this.link = false,
+    this.selected,
+    this.toggled,
+    this.onDown,
+  });
+
+  /// What a screen reader says.
+  final String label;
+
+  /// Null: the control cannot be pressed or reached, and says so.
+  final VoidCallback? onPressed;
+  final Widget child;
+
+  /// The focus ring's colour; the theme's text colour when not given.
+  final Color? ink;
+  final ShapeBorder shape;
+  final double ringInset;
+
+  /// Roles and states for screen readers. A switch is not a [button]; it
+  /// says [toggled]. A choice says whether it is [selected].
+  final bool button;
+  final bool link;
+  final bool? selected;
+  final bool? toggled;
+
+  /// Told while a finger or the mouse button is down on it.
+  final ValueChanged<bool>? onDown;
+
+  @override
+  State<Pressable> createState() => _PressableState();
+}
+
+class _PressableState extends State<Pressable> {
+  /// Reached from the keyboard: the ring is drawn.
+  bool _ring = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final press = widget.onPressed;
+    final down = widget.onDown;
+    final can = press != null;
+    return Semantics(
+      container: true,
+      button: widget.button ? true : null,
+      link: widget.link ? true : null,
+      enabled: widget.button ? can : null,
+      selected: widget.selected,
+      toggled: widget.toggled,
+      label: widget.label,
+      // The detector's focus and the gesture's tap action join this node.
+      child: FocusableActionDetector(
+        enabled: can,
+        mouseCursor: can ? SystemMouseCursors.click : MouseCursor.defer,
+        actions: {
+          // Space, and Enter outside a browser.
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) => press?.call(),
+          ),
+          // Enter in a browser.
+          ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+            onInvoke: (_) => press?.call(),
+          ),
+        },
+        onShowFocusHighlight: (show) {
+          if (show != _ring) setState(() => _ring = show);
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: can && down != null ? (_) => down(true) : null,
+          onTapCancel: can && down != null ? () => down(false) : null,
+          onTapUp: can && down != null ? (_) => down(false) : null,
+          onTap: press,
+          child: ExcludeSemantics(
+            child: CustomPaint(
+              foregroundPainter: _ring
+                  ? _FocusRingPainter(
+                      shape: widget.shape,
+                      inset: widget.ringInset,
+                      color: widget.ink ?? context.colors.text,
+                    )
+                  : null,
+              child: widget.child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A 2px line following [shape], [inset] inside the control's edge.
+class _FocusRingPainter extends CustomPainter {
+  _FocusRingPainter({
+    required this.shape,
+    required this.inset,
+    required this.color,
+  });
+
+  final ShapeBorder shape;
+  final double inset;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(inset);
+    if (rect.isEmpty) return;
+    canvas.drawPath(
+      shape.getOuterPath(rect),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FocusRingPainter old) =>
+      old.shape != shape || old.inset != inset || old.color != color;
+}
+
 /// The four pills. [primary] is white, [volt] is the accent with a glow (the
 /// money actions), [glass] is the quiet one, [danger] is glass with red ink.
 enum PillKind { primary, volt, glass, danger }
 
 /// A full-width pill button. While [busy] it shows a spinner beside
-/// [busyLabel] and cannot be pressed. Disabled it fades to 45%.
+/// [busyLabel] and cannot be pressed. Disabled it fades to 45%. Like every
+/// control here it is pressed through a [Pressable]: by touch, from the
+/// keyboard and by a screen reader.
 class PillButton extends StatefulWidget {
   const PillButton({
     super.key,
@@ -174,31 +314,24 @@ class _PillButtonState extends State<PillButton> {
       ),
       PillKind.glass || PillKind.danger => GlassSurface.pill(child: face),
     };
-    return Semantics(
-      button: true,
-      enabled: enabled,
+    return Pressable(
       label: widget.busy ? (widget.busyLabel ?? widget.label) : widget.label,
-      excludeSemantics: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: enabled ? (_) => setState(() => _down = true) : null,
-        onTapCancel: enabled ? () => setState(() => _down = false) : null,
-        onTapUp: enabled ? (_) => setState(() => _down = false) : null,
-        onTap: enabled
-            ? () {
-                HapticFeedback.selectionClick();
-                widget.onPressed!();
-              }
-            : null,
-        child: AnimatedScale(
-          scale: _down ? 0.97 : 1,
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-          child: AnimatedOpacity(
-            opacity: widget.onPressed == null && !widget.busy ? 0.45 : 1,
-            duration: const Duration(milliseconds: 200),
-            child: body,
-          ),
+      ink: ink,
+      onDown: (down) => setState(() => _down = down),
+      onPressed: enabled
+          ? () {
+              HapticFeedback.selectionClick();
+              widget.onPressed!();
+            }
+          : null,
+      child: AnimatedScale(
+        scale: _down ? 0.97 : 1,
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        child: AnimatedOpacity(
+          opacity: widget.onPressed == null && !widget.busy ? 0.45 : 1,
+          duration: const Duration(milliseconds: 200),
+          child: body,
         ),
       ),
     );
@@ -223,19 +356,17 @@ class GlassIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Tooltip(
     message: tooltip,
-    child: Semantics(
-      button: true,
+    // The button says its own name.
+    excludeFromSemantics: true,
+    child: Pressable(
       label: tooltip,
-      excludeSemantics: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onPressed,
-        child: GlassSurface.pill(
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Icon(icon, size: 18, color: context.colors.text),
-          ),
+      shape: const CircleBorder(),
+      onPressed: onPressed,
+      child: GlassSurface.pill(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Icon(icon, size: 18, color: context.colors.text),
         ),
       ),
     ),
@@ -251,6 +382,7 @@ class AppChip extends StatelessWidget {
     this.icon,
     this.selected = false,
     this.height = 34,
+    this.minWidth = 0,
   });
 
   final String text;
@@ -258,16 +390,23 @@ class AppChip extends StatelessWidget {
   final bool selected;
   final double height;
 
+  /// The narrowest the chip gets, so a chip that says "3" is still easy to
+  /// press. Its text is centred.
+  final double minWidth;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final ink = selected ? c.onVolt : c.text;
-    final face = SizedBox(
-      height: height,
+    final face = ConstrainedBox(
+      constraints: BoxConstraints.tightFor(
+        height: height,
+      ).copyWith(minWidth: minWidth),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (icon != null) ...[
               Icon(icon, size: 14, color: ink),
@@ -307,6 +446,10 @@ class ChipPicker<T> extends StatelessWidget {
     required this.selection,
     required this.label,
     required this.onChanged,
+    this.semanticLabel,
+    this.height = 34,
+    this.minWidth = 0,
+    this.wrap = false,
   });
 
   final List<T> options;
@@ -314,32 +457,57 @@ class ChipPicker<T> extends StatelessWidget {
   final String Function(T) label;
   final ValueChanged<T> onChanged;
 
+  /// What a screen reader says for an option when the chip alone ("6") does
+  /// not say what it is ("6 check-ins").
+  final String Function(T)? semanticLabel;
+
+  /// Each chip's height and smallest width. A form whose chips are its
+  /// main controls makes them a full touch target.
+  final double height;
+  final double minWidth;
+
+  /// False: one row that scrolls sideways when the chips do not fit. True:
+  /// the chips that do not fit go on a second row, so every option is on
+  /// the screen and can be reached with a mouse or a keyboard-driven
+  /// screen reader without scrolling sideways.
+  final bool wrap;
+
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    scrollDirection: Axis.horizontal,
-    child: Row(
-      children: [
-        for (final (i, option) in options.indexed) ...[
-          if (i > 0) const SizedBox(width: Space.s2),
-          Semantics(
-            button: true,
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final chips = [
+      for (final option in options)
+        Pressable(
+          label: semanticLabel?.call(option) ?? label(option),
+          selected: option == selection,
+          ink: option == selection ? c.onVolt : c.text,
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            onChanged(option);
+          },
+          child: AppChip(
+            text: label(option),
             selected: option == selection,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                HapticFeedback.selectionClick();
-                onChanged(option);
-              },
-              child: AppChip(
-                text: label(option),
-                selected: option == selection,
-              ),
-            ),
+            height: height,
+            minWidth: minWidth,
           ),
+        ),
+    ];
+    if (wrap) {
+      return Wrap(spacing: Space.s2, runSpacing: Space.s2, children: chips);
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final (i, chip) in chips.indexed) ...[
+            if (i > 0) const SizedBox(width: Space.s2),
+            chip,
+          ],
         ],
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 /// The "On / Off" capsule switch, with its label on the left.
@@ -361,88 +529,92 @@ class CapsuleToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final t = context.type;
-    return Semantics(
+    return Pressable(
+      // A switch, not a button: it says whether it is on, and what that
+      // means.
+      button: false,
       toggled: value,
-      label: title,
-      excludeSemantics: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onChanged(!value);
-        },
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: t.body(15, FontWeight.w600)),
-                  if (detail != null)
-                    Text(detail!, style: t.body(12).copyWith(color: c.text2)),
-                ],
-              ),
+      label: detail == null ? title : '$title. $detail',
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(Radii.sm)),
+      ),
+      // Around the whole row, clear of its words.
+      ringInset: -8,
+      onPressed: () {
+        HapticFeedback.selectionClick();
+        onChanged(!value);
+      },
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: t.body(15, FontWeight.w600)),
+                if (detail != null)
+                  Text(detail!, style: t.body(12).copyWith(color: c.text2)),
+              ],
             ),
-            const SizedBox(width: Space.s3),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
-              width: 64,
-              height: 34,
-              padding: const EdgeInsets.all(4),
-              decoration: ShapeDecoration(
-                color: value
-                    ? c.volt.withValues(alpha: 0.9)
-                    : Colors.white.withValues(alpha: 0.12),
-                shape: const StadiumBorder(),
-              ),
-              child: Stack(
-                children: [
-                  Align(
-                    alignment: value
-                        ? Alignment.centerLeft
-                        : Alignment.centerRight,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 5),
-                      child: Text(
-                        value ? 'On' : 'Off',
-                        style: t
-                            .body(11, FontWeight.w600)
-                            .copyWith(
-                              color: value
-                                  ? c.onVolt.withValues(alpha: 0.7)
-                                  : c.text2,
-                              height: 1,
-                            ),
-                      ),
+          ),
+          const SizedBox(width: Space.s3),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+            width: 64,
+            height: 34,
+            padding: const EdgeInsets.all(4),
+            decoration: ShapeDecoration(
+              color: value
+                  ? c.volt.withValues(alpha: 0.9)
+                  : Colors.white.withValues(alpha: 0.12),
+              shape: const StadiumBorder(),
+            ),
+            child: Stack(
+              children: [
+                Align(
+                  alignment: value
+                      ? Alignment.centerLeft
+                      : Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    child: Text(
+                      value ? 'On' : 'Off',
+                      style: t
+                          .body(11, FontWeight.w600)
+                          .copyWith(
+                            color: value
+                                ? c.onVolt.withValues(alpha: 0.7)
+                                : c.text2,
+                            height: 1,
+                          ),
                     ),
                   ),
-                  AnimatedAlign(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOut,
-                    alignment: value
-                        ? Alignment.centerRight
-                        : Alignment.centerLeft,
-                    child: Container(
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: value ? c.onVolt : c.text,
-                        shape: BoxShape.circle,
-                      ),
+                ),
+                AnimatedAlign(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  alignment: value
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: value ? c.onVolt : c.text,
+                      shape: BoxShape.circle,
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// A text field on glass, 54 high with 18px corners.
+/// A text field on glass, 54 high (64 when [large]) with 18px corners.
 class GlassField extends StatelessWidget {
   const GlassField({
     super.key,
@@ -454,9 +626,23 @@ class GlassField extends StatelessWidget {
     this.onChanged,
     this.suffix,
     this.fieldKey,
+    this.focusNode,
+    this.large = false,
+    this.scrollPadding = const EdgeInsets.all(20),
   });
 
   final TextEditingController controller;
+
+  /// So a form can put the cursor back in the field it needs filled in.
+  final FocusNode? focusNode;
+
+  /// The one field a screen is about (a round's name): taller, and set in
+  /// the title type the name is shown in everywhere else.
+  final bool large;
+
+  /// The room kept around the cursor when the field scrolls itself into
+  /// view. A screen with an action pinned over its list keeps more below.
+  final EdgeInsets scrollPadding;
   final String placeholder;
 
   /// Key of the inner text field, so tests can type into it.
@@ -474,12 +660,18 @@ class GlassField extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final t = context.type;
-    final style = mono ? t.mono.copyWith(fontSize: 15) : t.body(16);
+    final style = mono
+        ? t.mono.copyWith(fontSize: 15)
+        : large
+        ? t.title(26)
+        : t.body(16);
     final field = TextField(
       key: fieldKey,
       controller: controller,
+      focusNode: focusNode,
       onChanged: onChanged,
       style: style,
+      scrollPadding: scrollPadding,
       autocorrect: false,
       enableSuggestions: false,
       keyboardType: number ? TextInputType.number : TextInputType.text,
@@ -488,7 +680,11 @@ class GlassField extends StatelessWidget {
         isCollapsed: true,
         border: InputBorder.none,
         hintText: placeholder,
-        hintStyle: style.copyWith(color: c.text3),
+        // A placeholder is a sentence to read ("Paste the link"), so at
+        // body size it is as strong as the app's other quiet sentences. In
+        // the large title type the fainter tone is enough to read, and
+        // keeps an example name from looking typed in.
+        hintStyle: style.copyWith(color: large ? c.text3 : c.text2),
         suffixText: suffix,
         suffixStyle: t.body(14).copyWith(color: c.text2),
         contentPadding: const EdgeInsets.symmetric(horizontal: 18),
@@ -498,7 +694,10 @@ class GlassField extends StatelessWidget {
       label: label,
       child: GlassSurface(
         radius: Radii.md,
-        child: SizedBox(height: 54, child: Center(child: field)),
+        child: SizedBox(
+          height: large ? 64 : 54,
+          child: Center(child: field),
+        ),
       ),
     );
   }
@@ -674,6 +873,152 @@ class IconRow extends StatelessWidget {
         if (!last)
           Padding(
             padding: const EdgeInsets.only(left: 62),
+            child: Divider(color: c.hairline),
+          ),
+      ],
+    );
+  }
+}
+
+/// A row that does something when pressed: an icon (or any [leading]), a
+/// title, one quiet sentence under it, and on the right a short [value] and
+/// a chevron (or another [trailingIcon]). When the title and the value do
+/// not fit on one line the value goes under the title. The whole row is the
+/// target, at least [minHeight] high, and it can be reached and pressed
+/// from a keyboard. Rows stacked in one card draw a hairline between them
+/// unless [last].
+class ActionRow extends StatelessWidget {
+  const ActionRow({
+    super.key,
+    required this.title,
+    required this.onPressed,
+    this.detail,
+    this.icon,
+    this.leading,
+    this.value,
+    this.trailingIcon = Icons.chevron_right_rounded,
+    this.semanticLabel,
+    this.expanded,
+    this.last = true,
+    this.minHeight = 64,
+  });
+
+  final String title;
+  final String? detail;
+  final VoidCallback onPressed;
+
+  /// Drawn in a small circle on the left. [leading] replaces it.
+  final IconData? icon;
+  final Widget? leading;
+
+  /// A short value on the right, in the address type: "0x1234…abcd".
+  final String? value;
+  final IconData trailingIcon;
+
+  /// What a screen reader says; the title and the sentence when not given.
+  final String? semanticLabel;
+
+  /// For a row that opens and closes what is under it: whether it is open
+  /// now. Screen readers say so.
+  final bool? expanded;
+  final bool last;
+  final double minHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.type;
+    final c = context.colors;
+    void press() {
+      HapticFeedback.selectionClick();
+      onPressed();
+    }
+
+    final words = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(title, style: t.body(15, FontWeight.w600)),
+        if (detail != null)
+          Text(detail!, style: t.body(13).copyWith(color: c.text2)),
+      ],
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Semantics(
+          button: true,
+          expanded: expanded,
+          label: semanticLabel ?? (detail == null ? title : '$title. $detail'),
+          onTap: press,
+          excludeSemantics: true,
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: press,
+              focusColor: Colors.white.withValues(alpha: 0.10),
+              hoverColor: Colors.white.withValues(alpha: 0.04),
+              highlightColor: Colors.white.withValues(alpha: 0.06),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: minHeight),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      if (leading != null || icon != null) ...[
+                        leading ??
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(icon, size: 16, color: c.text),
+                            ),
+                        const SizedBox(width: 14),
+                      ],
+                      Expanded(
+                        child: value == null
+                            ? words
+                            // The value sits at the right of the title. On
+                            // a narrow screen with large text, where the
+                            // two do not fit on one line, it goes under
+                            // the title and both stay whole.
+                            : Wrap(
+                                alignment: WrapAlignment.spaceBetween,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: Space.s3,
+                                runSpacing: 2,
+                                children: [
+                                  words,
+                                  Text(
+                                    value!,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: t.mono.copyWith(
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                      const SizedBox(width: Space.s2),
+                      Icon(trailingIcon, size: 20, color: c.text2),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (!last)
+          Padding(
+            padding: EdgeInsets.only(
+              left: leading != null || icon != null ? 62 : 16,
+            ),
             child: Divider(color: c.hairline),
           ),
       ],

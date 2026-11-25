@@ -19,7 +19,7 @@ USD. Nothing has real value.
 | Launch | "Launch Demo Day", open to anyone once the bar is full | `CheckInLauncher.launch()`: the Flap Portal creates the token, the pool gets the sponsor money plus the launch share of the deposits, the vault gets the prize and half the supply |
 | Claim | "Claim · Demo Day", again whenever trading tax has arrived | `StreakVault.claim()` |
 | Refund | "Deposit back · Demo Day", if the deadline passes with no launch | `CheckInLauncher.refund()` |
-| Sponsor (optional) | "Sponsor the launch pool" | mint if needed, `approve`, `sponsor(amount)`; earns no share, comes back if the round does not launch |
+| Sponsor (optional) | "Sponsor the token pool" | mint if needed, `approve`, `sponsor(amount)`; earns no share, comes back if the round does not launch |
 
 **"Get test dollars" is a visible step on purpose.** It is labelled "Testnet:
 free test dollars. On mainnet this step is paying with a stablecoin." The
@@ -30,7 +30,7 @@ moved enough on a day: from phone health data, or self-reported in a browser.
 It cannot launch early, block a launch, choose who is paid beyond signing
 daily check-ins, or move funds. **Check-ins are attested, not proven.** The
 app says this on the second onboarding step, in "How it works" on Home and in
-About on the Account screen.
+About, a sheet opened from the Wallet screen.
 
 ## Many rounds
 
@@ -56,7 +56,7 @@ the members under it are all about that round.
   another screen is over Home, while a transaction is being sent, while a
   mouse rests on the cards, and when the cards are scrolled out of view. It
   never moves by itself when the app was opened from a round's link
-  (`/r/<launcher>`, or a link pasted under Account > Open a round), with
+  (`/r/<launcher>`, or a link pasted under + > Open an invite link), with
   reduced motion (the system setting, or `prefers-reduced-motion` in a
   browser) or with a screen reader. Dots under the cards show where you
   are; a tap on a dot goes there, and a mouse can drag the cards. See "The
@@ -80,11 +80,13 @@ sheet with the link, "Copy link" and a QR code of the same link.
 Phone builds have no web address unless `WEB_BASE_URL` is set; without it the
 sheet hands out the round's address instead. Phone builds also do not catch
 `https://` links from other apps (no universal links are set up), so a link
-or an address is pasted under **Account > Open a round**.
+or an address is pasted under **+ > Open an invite link** (the "+" in the
+tab bar opens "Add a round").
 
 ### Unlisted rounds
 
-"Start a new round" has an **Unlisted** switch. Its helper line is the whole
+The new-round screen has an **Unlisted** switch under "More options". Its
+helper line is the whole
 truth of it: "Not shown in the public list. Anyone with the link can still
 join, and the chain is public."
 
@@ -111,13 +113,15 @@ The app is exactly these, in a centred 480px column on wide screens.
 | Screen | Where | File | What it does |
 |---|---|---|---|
 | Onboarding | `/onboarding` | `lib/screens/onboarding_screen.dart` | Shown once. Step 1: a hero line, one sentence, one button. The wallet is made silently when the button is pressed and the faucet is asked in the background. Step 2: connect Apple Health / Health Connect ("Allow access", "Not now"); in a browser, a note that the check-in there is self-reported |
-| Home | `/` (and `/r/<launcher>`) | `lib/screens/home_screen.dart`, `lib/widgets/round_slider.dart` | At the top the round cards: name, a state chip (Open, Bar full, Launched, Ended), the bar (a tick gauge of `totalCheckIns` of `checkInGoal`), prize so far, members, the deadline, "You're in" for a member, "Unlisted" where it applies, and "Invite". Under the selected card: the streak as the hero numeral ("7 days"), today's state, the last seven days, the prize so far in dot-matrix numerals beside the launch pool, the members (address, days, streak) and "How it works". ONE primary action (table below) floats at the bottom on a scrim that is opaque behind it. Reads the rounds again every 20 seconds |
+| Home | `/` (and `/r/<launcher>`) | `lib/screens/home_screen.dart`, `lib/widgets/round_slider.dart` | At the top the round cards: name, a state chip (Open, Bar full, Launched, Ended), the bar (a tick gauge of `totalCheckIns` of `checkInGoal`), prize so far, members, the deadline, "You're in" for a member, "Unlisted" where it applies, and "Invite". Under the selected card: the streak as the hero numeral ("7 days"), today's state, the last seven days, the prize so far in dot-matrix numerals beside the token pool, the members (address, days, streak) and "How it works". ONE primary action (table below) floats at the bottom on a scrim that is opaque behind it. Reads the rounds again every 20 seconds |
 | Invite | sheet over Home | `lib/screens/invite_sheet.dart` | The round's link, "Copy link" and a QR code of it. On the device that started the round: the "Unlisted" switch |
-| Join | sheet over Home | `lib/screens/join_sheet.dart` | The round's name over the title. The deposit, its split into prize and launch pool (from `liquidityBps`), what happens if the bar fills or does not, then two steps with progress: "Get test dollars" and "Pay deposit". Waits for the faucet's gas first and says "Preparing your wallet" |
+| Join | sheet over Home | `lib/screens/join_sheet.dart` | The round's name over the title. The deposit, its split into prize and token pool (from `liquidityBps`), what happens if the bar fills or does not, then two steps with progress: "Get test dollars" and "Pay deposit". Waits for the faucet's gas first and says "Preparing your wallet" |
 | Check-in | sheet over Home | `lib/screens/checkin_sheet.dart` | The round's name over the title. Phone: today's steps from the health store against the minimum. Browser: a number field labelled "Self-reported, testnet only". Then the transaction link |
-| Sponsor | sheet over Home | `lib/screens/sponsor_sheet.dart` | The round's name over the title. An amount, prefilled with what the launch pool is short of |
+| Sponsor | sheet over Home | `lib/screens/sponsor_sheet.dart` | The round's name over the title. An amount, prefilled with what the token pool is short of |
 | Result | `/result` | `lib/screens/result_screen.dart` | After the launch: the round's name over the title, the token address with links to testnet.bscscan.com and `https://flap.sh/bnb-testnet/<token>`, your days, your share (tokens and test USD), Claim. Opens only once the round is launched |
-| Account | `/account` | `lib/screens/account_screen.dart` | Address, balances, "Back up key" (shown only after "Show private key"), "Import a key", "Open a round" (paste a link or an address), a small "Start a new round" form with the "Unlisted" switch, and About with "Built on Flap" |
+| Wallet | `/account` (also `/wallet`) | `lib/screens/account_screen.dart` | Your money and your key, nothing about rounds. The balance card first (test USD in dot-matrix numerals, test BNB for network fees, "Get test dollars"), then one list: "Address" (press to copy), "Back up your key" (a sheet; the key shows only after "Show key" and is hidden again each time the sheet opens), "Use another wallet" (a sheet: paste a key) and "About" (a sheet with "Built on Flap") |
+| Add a round | sheet, from the "+" in the tab bar | `lib/screens/add_round_sheet.dart` | Two rows: "Start a round" (opens `/new`) and "Open an invite link" (the sheet becomes one field for a link or an address; on success the app goes Home with that round selected). The "+" is an action, not a place: it is never the selected tab |
+| New round | `/new` | `lib/screens/new_round_screen.dart` | A full screen with a back control and no tab bar. Name, deposit, goal, how long it runs; the token pool's share and the "Unlisted" switch under "More options"; "The deal" (the choices in money, line by line); "Start round" pinned at the bottom. After it the same screen says "Round started" with the round's name, "Invite people", "Go to round" and whether the server saved the listing |
 
 Home's one primary action, for the selected round (`AppState.stage` in
 `lib/app_state.dart`). Every action that does something names its round,
@@ -128,7 +132,7 @@ here "Demo Day":
 | not a member | **Join Demo Day · 1,000 USD** | opens the join sheet |
 | member, not checked in today | **Check in · Demo Day** | opens the check-in sheet |
 | member, checked in today | **Checked in** (disabled) | "Come back tomorrow. The next day starts in 5 h 12 min." |
-| bar full, before the deadline | **Launch Demo Day** | anyone, member or not. If the launch pool is under Flap's floor the button is disabled, the hint says how much is missing and "Sponsor the launch pool" appears. A member who has not checked in today also gets "Check in first" |
+| bar full, before the deadline | **Launch Demo Day** | anyone, member or not. If the token pool is under Flap's floor the button is disabled, the hint says how much is missing and "Sponsor the token pool" appears. A member who has not checked in today also gets "Check in first" |
 | launched, you have days | **Claim · Demo Day** | opens the result |
 | launched, no days | **See the result · Demo Day** | |
 | deadline passed, money in the round | **Deposit back · Demo Day** | |
@@ -137,7 +141,7 @@ here "Demo Day":
 | server unreachable | one sentence and "Retry" | |
 
 For the selected round, membership, days, today's check-in, the deposit,
-`launched`, `totalCheckIns` and the launch pool are read from the round's
+`launched`, `totalCheckIns` and the token pool are read from the round's
 contract; if the chain cannot be read the server's numbers stand in. The
 streak, the list of days and the members list come from the server. The
 other cards show the server's numbers, and "You're in" from one `isMember`
@@ -170,12 +174,13 @@ is clear at its top edge and fully opaque 48px lower, where the hint line
 starts, so nothing shows through the text. The content's bottom padding is
 the measured height of the floating area plus 16px, so the last card scrolls
 fully above it whatever the area holds (it is taller when "Sponsor the
-launch pool" is there).
+token pool" is there).
 
 ### Starting a round
 
-Account has "Start a new round": name, deposit, launch pool share, check-in
-goal, deadline, and the "Unlisted" switch. The app mines the launch salt
+The "+" in the tab bar opens "Add a round"; "Start a round" there opens the
+new-round screen (`/new`): name, deposit, check-in goal, how long it runs,
+and under "More options" the token pool's share and the "Unlisted" switch. The app mines the launch salt
 (the token address must end in `7777`), calls `Portal.newLauncher` with the
 `CheckInLauncherFactory` and the Portal's 0.005 tBNB salt lock fee, and then:
 
@@ -218,7 +223,7 @@ code is used): the same screens, layout, type, spacing, motion and parts.
 - **Background.** Deep ink (`#0A0E11` / `#05080A`) with a drifting aurora:
   nine soft lights on a 3 by 3 grid whose middle points move on 30, 40 and 60
   second waves, under a faint film grain (`AuroraBackground`). Four moods:
-  ink (Home, Account, first step), steel (second onboarding step, sheets),
+  ink (Home, Wallet, first step), steel (second onboarding step, sheets),
   volt (the result, a finished sheet), danger. It stands still when the
   system or the browser asks for reduced motion, like every other loop.
 - **Glass.** Cards blur what is behind them, with a faint white fill and a
@@ -235,7 +240,8 @@ code is used): the same screens, layout, type, spacing, motion and parts.
 - **Parts.** Pill buttons 58 high in four kinds (white, volt with a glow,
   glass, danger) that shrink to 97% when pressed; tick-mark gauges; a week of
   day pills; identicon orbs for addresses; a status badge with a pulsing dot;
-  a floating glass tab bar with two round buttons (Home, Account); a glass
+  a floating glass tab bar with three round buttons (Home, "+", Wallet; the
+  "+" is an action and is never the selected one); a glass
   banner that drops from the top for messages.
 
 ## Layout
@@ -253,7 +259,7 @@ lib/
     health_service_io.dart    phones: today's steps from Apple Health / Health Connect (health package)
     health_service_stub.dart  web: no health store, `available` is false
     wallet_store.dart       device key, onboarding flag, a pending check-in, and the rounds this device knows with the one last chosen, in flutter_secure_storage
-  screens/                  onboarding, home, join / check-in / sponsor / invite sheets, result, account
+  screens/                  onboarding, home, join / check-in / sponsor / invite / add-a-round sheets, new round, result, wallet (account_screen.dart)
   theme/                    colour and size tokens (dark only), type roles, ThemeData
   widgets/
     aurora.dart             AuroraBackground and its moods, the track on the first screen, the wordmark
@@ -276,7 +282,7 @@ test/
   slider_test.dart          the cards and dots, moving on every 5 seconds until a touch (fake timers), reduced motion, the invite sheet and its QR, the scrim and the room under the content
   safe_action_test.dart     the action is for the round it names: no moving on after the first touch, with a sheet or dialog open, from a round link or with reduced motion; the round's name on the action (and cut short when long) and over the sheets' titles; a sheet keeps its round when the selection changes behind it
   home_test.dart            a widget test for each Home state, plus the bar, prize, members, no round, unreachable
-  flow_test.dart            join sheet steps, check-in on web and phone, onboarding and routing, /r/<launcher> with and without a wallet, result, account, the "Unlisted" switch and the registration call
+  flow_test.dart            join sheet steps, check-in on web and phone, onboarding and routing, /r/<launcher> with and without a wallet, result, Wallet and its sheets, the "+" and "Add a round", the new-round screen (the deal, the "Unlisted" switch, the registration call, the done state)
   design_test.dart          formats, dot-matrix font, gauges, aurora, pills, banner, banned words
   wallet_key_test.dart      the key is always 64 hex characters
 ```
@@ -316,7 +322,7 @@ build.
 | `VERIFIER_URL` | the server's base URL. **Phone builds need it.** The web build does not | web: page origin + `/api`; phones: none |
 | `WEB_BASE_URL` | where the web build is served: the start of every round's invite link (`<WEB_BASE_URL>/#/r/<launcher>`) | the page's own address on the web; none on phones (the invite sheet then hands out the round's address) |
 
-The three addresses are only needed for "Start a new round". While any of
+The three addresses are only needed to start a new round (`/new`). While any of
 them is the placeholder, that form shows "This build cannot start a round
 yet." with the missing names; joining, checking in, launching and claiming
 work without them, because the round's address comes from the server.
@@ -362,7 +368,7 @@ What the app calls (`lib/services/verifier_api.dart`; the tests in
 | `GET /rounds/:launcher/me/:address` | `streak`, `bestStreak`, `days`, and stand-ins for membership, days and the share when the chain cannot be read. Addresses are sent in lower case |
 | `GET /rounds/:launcher/members` | the members list, a plain JSON array (an object with `members` is also read) |
 | `POST /rounds/:launcher/checkin` | `{address, steps, source, signature}`. `source` is `healthkit`, `healthconnect` or `self`. `signature` is personal_sign of `Cypher Run checkin <launcher> <YYYY-MM-DD> <steps>` with the launcher in lower case and the day in UTC. The answer is `{day, dayIndex, attesterSignature}` |
-| `POST /rounds` | `{launcher, unlisted, signature}` with personal_sign of `Cypher Run round <launcher> <listed|unlisted>` (launcher in lower case) by the wallet that created the round. The answer is `{launcher, unlisted}`. Sent after "Start a new round" and when the creator flips the switch in the invite sheet |
+| `POST /rounds` | `{launcher, unlisted, signature}` with personal_sign of `Cypher Run round <launcher> <listed|unlisted>` (launcher in lower case) by the wallet that created the round. The answer is `{launcher, unlisted}`. Sent after "Start round" and when the creator flips the switch in the invite sheet |
 | `POST /faucet` | `{address, signature}` with personal_sign of `Cypher Run faucet <address>`, address in lower case. Gas only |
 
 **An older server.** A server from before `/rounds` answers 404 to

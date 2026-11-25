@@ -39,8 +39,9 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color success;
   final Color danger;
 
-  /// White at 100%, 64% and 38%. Sentences use the first two; the third is
-  /// for units, placeholders and fine print.
+  /// White at 100%, 64% and 38%. Sentences use the first two, a field's
+  /// placeholder included; the third is for units, fine print and a
+  /// placeholder in the large title type.
   final Color text;
   final Color text2;
   final Color text3;

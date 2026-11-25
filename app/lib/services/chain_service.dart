@@ -29,7 +29,7 @@ class RoundChain {
   final bool launched;
   final int totalCheckIns;
 
-  /// What would seed the launch pool now: all sponsor money plus the launch
+  /// What would seed the token pool now: all sponsor money plus the launch
   /// share of the deposits.
   final BigInt poolQuoteNow;
 
@@ -337,7 +337,7 @@ class ChainService {
     );
   }
 
-  /// Adds [amount] to the launch pool. It earns no share and comes back to
+  /// Adds [amount] to the token pool. It earns no share and comes back to
   /// this wallet if the round does not launch.
   Future<String> sponsor(
     EthPrivateKey key,
@@ -381,7 +381,7 @@ class ChainService {
     const [],
     gas: GasLimit.launch,
     rejected:
-        'The launch was rejected. The launch pool may be under the minimum '
+        'The launch was rejected. The token pool may be under the minimum '
         'Flap needs; a sponsor can add the rest.',
   );
 

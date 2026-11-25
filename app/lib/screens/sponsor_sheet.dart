@@ -18,7 +18,7 @@ Future<void> showSponsorSheet(
   builder: (_) => SponsorSheet(state: state, round: round),
 );
 
-/// Optional: anyone may add test USD that goes only to the launch pool. It
+/// Optional: anyone may add test USD that goes only to the token pool. It
 /// earns no share and comes back to the sponsor if the round does not
 /// launch. Flap will not open a pool under its floor, so a small round needs
 /// this to launch.
@@ -76,7 +76,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
       if (!mounted) return;
       showMessage(
         context,
-        '${formatMoney(amount, AppConfig.quoteSymbol)} added to the launch '
+        '${formatMoney(amount, AppConfig.quoteSymbol)} added to the token '
         'pool.',
         kind: BannerKind.success,
       );
@@ -109,11 +109,11 @@ class _SponsorSheetState extends State<SponsorSheet> {
               const SizedBox(height: Space.s1),
               Semantics(
                 header: true,
-                child: Text('Sponsor the launch pool', style: t.title(30)),
+                child: Text('Sponsor the token pool', style: t.title(30)),
               ),
               const SizedBox(height: Space.s2),
               Text(
-                'Sponsor money goes only to the launch pool. It earns no '
+                'Sponsor money goes only to the token pool. It earns no '
                 'share, and it comes back to you if the token does not '
                 'launch.',
                 style: t.body(15).copyWith(color: c.text2),
@@ -165,7 +165,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
               ],
               PillButton(
                 kind: PillKind.volt,
-                label: _error != null ? 'Retry' : 'Add to the launch pool',
+                label: _error != null ? 'Try again' : 'Add to the token pool',
                 busy: _busy,
                 busyLabel: _state.funding
                     ? 'Preparing your wallet…'

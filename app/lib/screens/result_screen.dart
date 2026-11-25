@@ -360,7 +360,7 @@ class _ResultScreenState extends State<ResultScreen> {
                               icon: _error != null
                                   ? Icons.refresh_rounded
                                   : Icons.auto_awesome_rounded,
-                              label: _error != null ? 'Retry' : 'Claim',
+                              label: _error != null ? 'Try again' : 'Claim',
                               busy: _busy,
                               busyLabel: _state.funding
                                   ? 'Preparing your wallet…'

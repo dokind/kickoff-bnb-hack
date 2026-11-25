@@ -158,7 +158,7 @@ class _JoinSheetState extends State<JoinSheet> {
                           '${formatBps(10000 - round.liquidityBps)}',
                     ),
                     KeyValueRow(
-                      'To the launch pool',
+                      'To the token pool',
                       '${formatMoney(toPool, usd)} · '
                           '${formatBps(round.liquidityBps)}',
                     ),
@@ -227,7 +227,7 @@ class _JoinSheetState extends State<JoinSheet> {
         ],
         if (!hasDollars)
           PillButton(
-            label: _error != null ? 'Retry' : 'Get test dollars',
+            label: _error != null ? 'Try again' : 'Get test dollars',
             icon: _error != null ? Icons.refresh_rounded : Icons.water_drop,
             busy: _busy,
             busyLabel: preparing
@@ -239,7 +239,7 @@ class _JoinSheetState extends State<JoinSheet> {
           PillButton(
             kind: PillKind.volt,
             label: _error != null
-                ? 'Retry'
+                ? 'Try again'
                 : 'Pay deposit · ${formatMoney(deposit, usd)}',
             icon: _error != null ? Icons.refresh_rounded : Icons.lock_rounded,
             busy: _busy,

@@ -267,7 +267,7 @@ class AppState extends ChangeNotifier {
   String get address => key!.address.with0x;
   bool get hasWallet => key != null;
 
-  /// The wallet key as hex, for "Back up key" only.
+  /// The wallet key as hex, for "Back up your key" only.
   String get keyHex => privateKeyHex(key!);
 
   // The round, chain first ----------------------------------------------------
@@ -301,7 +301,7 @@ class AppState extends ChangeNotifier {
 
   BigInt get poolQuoteNow => poolQuoteNowOf(selected);
 
-  /// What is in the launch pool of the round at [launcher], chain first.
+  /// What is in the token pool of the round at [launcher], chain first.
   BigInt poolQuoteNowOf(String? launcher) {
     final id = launcher?.toLowerCase();
     return _views[id]?.onChain?.poolQuoteNow ??
@@ -309,7 +309,7 @@ class AppState extends ChangeNotifier {
         BigInt.zero;
   }
 
-  /// How much the launch pool is short of what Flap needs. Zero when it has
+  /// How much the token pool is short of what Flap needs. Zero when it has
   /// enough.
   BigInt get poolShort => poolShortOf(selected);
 
@@ -960,7 +960,7 @@ class AppState extends ChangeNotifier {
     return tx;
   }
 
-  /// Adds [amount] to the launch pool. Mints the test USD first when the
+  /// Adds [amount] to the token pool. Mints the test USD first when the
   /// wallet does not hold it.
   Future<String> sponsor(BigInt amount, {String? launcher}) async {
     final r = _acting(launcher);
@@ -1056,8 +1056,8 @@ class AppState extends ChangeNotifier {
     return tx;
   }
 
-  /// "Start a new round" in Account. The new round goes on this device's
-  /// slider at once and is selected; then the server is told whether it is
+  /// "Start round" on the new-round screen. The new round goes on this
+  /// device's slider at once and is selected; then the server is told whether it is
   /// shown in the public list ([unlisted] means it is not; anyone with the
   /// link can still join, and the chain is public). Returns the new round's
   /// contract address. If the server did not save the choice, the round's
@@ -1072,9 +1072,12 @@ class AppState extends ChangeNotifier {
   }) async {
     await ensureGas(
       AppConfig.startRoundGasWei,
+      // The faucet fills a wallet once, so waiting does not help here: the
+      // sentence says where more comes from.
       shortMessage:
-          'Starting a round needs about 0.007 test BNB and this wallet has '
-          'less.',
+          'Starting a round needs about 0.007 test BNB in fees and this '
+          'wallet has less. Send test BNB to your address (Wallet, then '
+          'Address), then try again.',
     );
     final launcher = await chain.createRound(
       key!,

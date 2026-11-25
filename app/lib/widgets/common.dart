@@ -416,7 +416,7 @@ class ErrorRetry extends StatelessWidget {
             kind: PillKind.glass,
             height: Sizes.buttonSmall,
             icon: Icons.refresh_rounded,
-            label: 'Retry',
+            label: 'Try again',
             onPressed: onRetry,
           ),
         ],
@@ -426,13 +426,16 @@ class ErrorRetry extends StatelessWidget {
 }
 
 /// A sentence that went wrong inside a flow, with its icon. The flow's own
-/// button becomes "Retry".
+/// button becomes "Try again".
 class ErrorLine extends StatelessWidget {
   const ErrorLine(this.text, {super.key});
   final String text;
 
   @override
   Widget build(BuildContext context) => Semantics(
+    // Its own node: only this sentence is announced when it appears, not
+    // the form around it.
+    container: true,
     liveRegion: true,
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -486,26 +489,28 @@ class LinkRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.type;
     final c = context.colors;
-    return Semantics(
+    return Pressable(
+      button: false,
       link: true,
       label: label,
-      excludeSemantics: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _open(context),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: Sizes.touch),
-          child: Row(
-            children: [
-              Expanded(child: Text(label, style: t.body(15, FontWeight.w500))),
-              if (value != null) ...[
-                const SizedBox(width: Space.s2),
-                Text(shortAddress(value!), style: t.mono),
-              ],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(Radii.sm)),
+      ),
+      // Around the whole line, clear of its words.
+      ringInset: -8,
+      onPressed: () => _open(context),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: Sizes.touch),
+        child: Row(
+          children: [
+            Expanded(child: Text(label, style: t.body(15, FontWeight.w500))),
+            if (value != null) ...[
               const SizedBox(width: Space.s2),
-              Icon(Icons.open_in_new_rounded, size: 18, color: c.text2),
+              Text(shortAddress(value!), style: t.mono),
             ],
-          ),
+            const SizedBox(width: Space.s2),
+            Icon(Icons.open_in_new_rounded, size: 18, color: c.text2),
+          ],
         ),
       ),
     );

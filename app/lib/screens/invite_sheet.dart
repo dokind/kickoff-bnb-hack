@@ -10,7 +10,7 @@ import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
 
-/// What the invite sheet and the "Start a new round" form say about a round
+/// What the invite sheet and the new-round screen say about a round
 /// that is not in the public list. Exactly this: it is not hidden.
 const unlistedNote =
     'Not shown in the public list. Anyone with the link can still join, and '
@@ -142,7 +142,7 @@ class _InviteSheetState extends State<InviteSheet> {
               Text(
                 'This build has no web address, so there is no link to hand '
                 'out. Share the round\'s address instead: it opens under '
-                '"Open a round" in Account.',
+                '"Open an invite link", behind the + on the tab bar.',
                 style: t.body(13).copyWith(color: c.text2),
               ),
               const SizedBox(height: Space.s3),

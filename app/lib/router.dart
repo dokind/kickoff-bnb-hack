@@ -6,19 +6,25 @@ import 'app_state.dart';
 import 'config.dart';
 import 'screens/account_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/new_round_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/result_screen.dart';
 
-/// Routes. The first two are the places in the floating tab bar.
+/// Routes. The first two are the places in the floating tab bar; the "+"
+/// between them opens the "Add a round" sheet, which is not a route.
 ///   /            Home: the streak, the one action, the bar, the prize, members
-///   /account     address, balances, back up key, import a key, start a round
+///   /account     Wallet: the balance, the address, back up your key, use
+///                another wallet, about. `/wallet` is the same screen.
+///   /new         New round: name it, set the deposit and the goal, start it.
+///                A full screen with a back control and no tab bar, pushed
+///                over the place the person was on.
 ///   /onboarding  two first-run steps (shown once, before anything else)
 ///   /result      after the launch: the token, your days, your share, Claim
 ///   `/r/<launcher>`  a round's link: Home, with that round selected (listed or
 ///                not). A first-time visitor goes through onboarding first
 ///                and lands on the round after it.
-/// Joining, checking in, sponsoring and inviting are sheets over Home, not
-/// routes.
+/// Joining, checking in, sponsoring, inviting and opening an invite link are
+/// sheets, not routes.
 GoRouter buildRouter(AppState state, {String? initialLocation}) => GoRouter(
   initialLocation: initialLocation,
   refreshListenable: state,
@@ -49,6 +55,14 @@ GoRouter buildRouter(AppState state, {String? initialLocation}) => GoRouter(
     GoRoute(
       path: '/account',
       builder: (_, _) => AccountScreen(state: state),
+    ),
+    GoRoute(
+      path: '/wallet',
+      builder: (_, _) => AccountScreen(state: state),
+    ),
+    GoRoute(
+      path: '/new',
+      builder: (_, _) => NewRoundScreen(state: state),
     ),
     GoRoute(
       path: '/onboarding',

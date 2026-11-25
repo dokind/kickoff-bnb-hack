@@ -23,7 +23,7 @@ import 'sponsor_sheet.dart';
 /// Home, the one screen. At the top: the rounds, one card each, swiped
 /// sideways (they also move on by themselves). The card in view is the
 /// selected round and everything under it is about that round: the streak
-/// as the hero numeral, today's state, the prize and the launch pool, the
+/// as the hero numeral, today's state, the prize and the token pool, the
 /// members, and ONE primary action that changes with it:
 ///   "Join Demo Day · 1,000 USD" -> "Check in · Demo Day" -> "Checked in"
 ///   (with a hint about tomorrow) -> "Launch Demo Day" once the bar is full
@@ -56,7 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
   AppState get _state => widget.state;
 
   /// Other people's check-ins move the bar, so Home reads the rounds again
-  /// every twenty seconds while it is open.
+  /// every twenty seconds while it is open and nothing covers it.
   Timer? _poll;
 
   final _scroll = ScrollController();
@@ -70,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _poll = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (!_busy) _state.refresh();
+      if (_canPoll()) _state.refresh();
     });
     _state.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
@@ -84,10 +84,21 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  /// Home reads the rounds again only while it is what the person is
+  /// looking at. Under a sheet or another screen it waits: each of those
+  /// reads again after its own action, and a read started under the
+  /// new-round screen could finish after the round was started and put the
+  /// list back as it was before, without the new round.
+  bool _canPoll() =>
+      mounted && !_busy && (ModalRoute.of(context)?.isCurrent ?? true);
+
   /// A sentence the state wants said once (a link that leads nowhere).
+  /// While a sheet or another screen is over Home it is left alone: the
+  /// "Open an invite link" sheet says it itself, next to its field.
   void _changed() {
     final notice = _state.notice;
     if (notice == null || !mounted) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
     _state.notice = null;
     showMessage(context, notice);
   }
@@ -269,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             if (round != null) ..._action(context, round),
                             if (widget.showBar) ...[
                               const SizedBox(height: Space.s3),
-                              const MainTabs(current: 0),
+                              MainTabs(current: MainTabs.home, state: _state),
                             ],
                           ],
                         ),
@@ -363,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return [
           hint(
             short > BigInt.zero
-                ? 'The bar is full, but the launch pool is '
+                ? 'The bar is full, but the token pool is '
                       '${formatMoney(short, usd)} short of what Flap needs.'
                 : 'The bar is full. Anyone can launch the token now.',
           ),
@@ -389,7 +400,7 @@ class _HomeScreenState extends State<HomeScreen> {
             PillButton(
               kind: PillKind.glass,
               height: Sizes.buttonSmall,
-              label: 'Sponsor the launch pool',
+              label: 'Sponsor the token pool',
               onPressed: () => showSponsorSheet(context, _state, round),
             ),
           ] else if (canCheckInFirst && !_busy)
@@ -476,7 +487,7 @@ class _TextAction extends StatelessWidget {
 }
 
 /// A greeting and how many rounds there are; the balance and the wallet's
-/// orb on the right, which opens Account.
+/// orb on the right, which opens Wallet.
 class _Header extends StatelessWidget {
   const _Header({required this.state});
   final AppState state;
@@ -518,8 +529,7 @@ class _Header extends StatelessWidget {
           if (state.hasWallet)
             Semantics(
               button: true,
-              label:
-                  'Account. ${formatMoney(state.usd, AppConfig.quoteSymbol)}',
+              label: 'Wallet. ${formatMoney(state.usd, AppConfig.quoteSymbol)}',
               excludeSemantics: true,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -577,7 +587,8 @@ class _NoRound extends StatelessWidget {
             Text('NO ROUND\nRIGHT NOW.', style: t.display(44)),
             const SizedBox(height: Space.s3),
             Text(
-              'A round shows here as soon as one opens.',
+              'Press + to start one, or to open an invite link someone '
+              'sent you.',
               style: t.body(15).copyWith(color: c.text2),
             ),
             const SizedBox(height: Space.s4),
@@ -670,7 +681,7 @@ class _StreakHero extends StatelessWidget {
   }
 }
 
-/// The prize so far in dot-matrix numerals, beside the launch pool.
+/// The prize so far in dot-matrix numerals, beside the token pool.
 class _PrizeCard extends StatelessWidget {
   const _PrizeCard({required this.state, required this.round});
   final AppState state;
@@ -717,7 +728,7 @@ class _PrizeCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const Overline('Launch pool'),
+                const Overline('Token pool'),
                 const SizedBox(height: 6),
                 Text(
                   formatAmount(state.poolQuoteNow, maxFraction: 0),
@@ -950,7 +961,7 @@ class _HowItWorks extends StatelessWidget {
                 text:
                     'The deposit is ${formatMoney(state.deposit, usd)}, paid '
                     'once: ${formatBps(10000 - round.liquidityBps)} to the '
-                    'prize, ${formatBps(round.liquidityBps)} to the launch '
+                    'prize, ${formatBps(round.liquidityBps)} to the token '
                     'pool.',
               ),
               IconRow(

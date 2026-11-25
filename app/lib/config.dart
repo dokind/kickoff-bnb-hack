@@ -187,7 +187,7 @@ class AppConfig {
   /// transaction sent at that price is never mined.
   static final BigInt gasPriceWei = BigInt.from(1000000000); // 1 gwei
 
-  /// The share of each deposit that goes to the launch pool when a round is
+  /// The share of each deposit that goes to the token pool when a round is
   /// started from this app, in basis points (the factory's
   /// DEFAULT_LIQUIDITY_BPS).
   static const int defaultLiquidityBps = 3000;

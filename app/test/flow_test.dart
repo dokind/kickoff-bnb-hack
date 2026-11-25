@@ -1,20 +1,33 @@
 // The join sheet's two steps, the check-in on the web and on a phone,
-// onboarding and routing, the result and Account.
+// onboarding and routing, the result, Wallet, "Add a round" and the
+// new-round screen.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:pacepact/app_state.dart';
 import 'package:pacepact/router.dart';
 import 'package:pacepact/screens/account_screen.dart';
+import 'package:pacepact/screens/add_round_sheet.dart';
 import 'package:pacepact/screens/checkin_sheet.dart';
 import 'package:pacepact/screens/home_screen.dart';
 import 'package:pacepact/screens/invite_sheet.dart';
 import 'package:pacepact/screens/join_sheet.dart';
+import 'package:pacepact/screens/new_round_screen.dart';
 import 'package:pacepact/screens/onboarding_screen.dart';
 import 'package:pacepact/screens/result_screen.dart';
 import 'package:pacepact/services/verifier_api.dart';
+import 'package:pacepact/theme/tokens.dart';
 import 'package:pacepact/util/format.dart';
 import 'package:pacepact/widgets/common.dart';
 import 'package:pacepact/widgets/dot_matrix.dart';
+import 'package:pacepact/widgets/gauges.dart';
+import 'package:pacepact/widgets/main_tabs.dart';
+import 'package:pacepact/widgets/tab_bar.dart';
+import 'package:web3dart/web3dart.dart';
 
 import 'support.dart';
 
@@ -58,6 +71,110 @@ Future<void> pumpApp(
   await settle(tester, 12);
 }
 
+/// The new-round screen in a router beside Home, in a build that has its
+/// contract addresses (the tests' own build has none).
+Future<void> pumpNewRound(WidgetTester tester, AppState state) async {
+  usePhone(tester);
+  await tester.pumpWidget(
+    MaterialApp.router(
+      theme: inAppTheme,
+      routerConfig: GoRouter(
+        initialLocation: '/new',
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => HomeScreen(state: state),
+          ),
+          GoRoute(
+            path: '/new',
+            builder: (_, _) => NewRoundScreen(state: state, missing: const []),
+          ),
+        ],
+      ),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(disableAnimations: true),
+        child: AppBackdrop(child: child!),
+      ),
+    ),
+  );
+  await settle(tester, 12);
+}
+
+/// Presses the chip that says [text] in the picker with [key].
+Future<void> pick(WidgetTester tester, String key, String text) async {
+  final chip = find.descendant(
+    of: find.byKey(Key(key)),
+    matching: find.text(text),
+  );
+  await tester.ensureVisible(chip);
+  await tester.pump();
+  await tester.tap(chip);
+  await settle(tester);
+}
+
+/// The control the keyboard is on: a pressable's name, an action row's
+/// title, or the key of a text field.
+String? focusedName() {
+  final context = FocusManager.instance.primaryFocus?.context;
+  if (context == null) return null;
+  final field = context.findAncestorWidgetOfExactType<TextField>();
+  if (field != null) return '${field.key}';
+  return context.findAncestorWidgetOfExactType<Pressable>()?.label ??
+      context.findAncestorWidgetOfExactType<ActionRow>()?.title;
+}
+
+/// Presses Tab until the keyboard is on [name]; fails when it never gets
+/// there. Returns every control it passed on the way, [name] included.
+Future<List<String?>> tabTo(WidgetTester tester, String name) async {
+  final passed = <String?>[];
+  for (var i = 0; i < 40 && focusedName() != name; i++) {
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    passed.add(focusedName());
+  }
+  expect(focusedName(), name, reason: 'Tab reaches "$name"');
+  return passed;
+}
+
+/// A round being started that the test lets through when it says so, and a
+/// membership read it can hold open the same way.
+class SlowChain extends FakeChain {
+  Completer<void>? holdCreate;
+  Completer<void>? holdMember;
+
+  @override
+  Future<bool> isMemberOf(String launcher, String member) async {
+    await holdMember?.future;
+    return super.isMemberOf(launcher, member);
+  }
+
+  @override
+  Future<String> createRound(
+    EthPrivateKey key, {
+    required String name,
+    required String symbol,
+    required BigInt deposit,
+    required int liquidityBps,
+    required int checkInGoal,
+    required DateTime deadline,
+  }) async {
+    await holdCreate?.future;
+    return super.createRound(
+      key,
+      name: name,
+      symbol: symbol,
+      deposit: deposit,
+      liquidityBps: liquidityBps,
+      checkInGoal: checkInGoal,
+      deadline: deadline,
+    );
+  }
+}
+
+const unlistedNoteText =
+    'Not shown in the public list. Anyone with the link can still join, and '
+    'the chain is public.';
+
 void main() {
   tearDown(() {
     bannerNote.value = null;
@@ -74,7 +191,7 @@ void main() {
       expect(find.text('1,000 USD'), findsOneWidget);
       expect(find.text('To the prize'), findsOneWidget);
       expect(find.text('700 USD · 70%'), findsOneWidget);
-      expect(find.text('To the launch pool'), findsOneWidget);
+      expect(find.text('To the token pool'), findsOneWidget);
       expect(find.text('300 USD · 30%'), findsOneWidget);
       expect(find.text('If it has not by 2 Dec 2026'), findsOneWidget);
       expect(find.text('Full deposit back'), findsOneWidget);
@@ -169,7 +286,7 @@ void main() {
       expect(button('Pay deposit · 1,000 USD'), findsOneWidget);
     });
 
-    testWidgets('a failed step is one sentence and the button says Retry', (
+    testWidgets('a failed step is one sentence and the button says Try again', (
       tester,
     ) async {
       final chain = FakeChain(fail: 'mint');
@@ -180,7 +297,7 @@ void main() {
       await settle(tester);
       expect(find.text('The mint was rejected. Try again.'), findsOneWidget);
       expect(find.textContaining('Exception'), findsNothing);
-      await tester.tap(button('Retry'));
+      await tester.tap(button('Try again'));
       await settle(tester);
       expect(chain.calls, ['mint 1000']);
       expect(button('Pay deposit · 1,000 USD'), findsOneWidget);
@@ -232,7 +349,7 @@ void main() {
         findsOneWidget,
       );
       expect(server.count('POST /rounds/$launcher/checkin'), 0);
-      expect(button('Retry'), findsOneWidget);
+      expect(button('Try again'), findsOneWidget);
     });
 
     testWidgets('phone: today\'s steps are read from Health and posted', (
@@ -313,7 +430,7 @@ void main() {
       await settle(tester);
       expect(find.text('The checkIn was rejected. Try again.'), findsOneWidget);
       expect(find.byKey(const Key('steps')), findsNothing);
-      await tester.tap(button('Retry'));
+      await tester.tap(button('Try again'));
       await settle(tester);
       expect(
         server.count('POST /rounds/$launcher/checkin'),
@@ -413,18 +530,29 @@ void main() {
       expect(find.byType(HomeScreen), findsOneWidget);
     });
 
-    testWidgets('the floating bar goes from Home to Account and back', (
+    testWidgets('the floating bar goes from Home to Wallet and back', (
       tester,
     ) async {
       final state = await makeState();
       await pumpApp(tester, state);
-      await tester.tap(find.byTooltip('Account'));
+      await tester.tap(find.byTooltip('Wallet'));
       await settle(tester, 12);
       expect(find.byType(AccountScreen), findsOneWidget);
-      expect(find.text('ACCOUNT'), findsOneWidget);
+      expect(find.text('WALLET'), findsOneWidget);
+      expect(
+        tester.widget<FloatingTabBar>(find.byType(FloatingTabBar)).current,
+        MainTabs.wallet,
+      );
       await tester.tap(find.byTooltip('Home'));
       await settle(tester, 12);
       expect(find.byType(HomeScreen), findsOneWidget);
+    });
+
+    testWidgets('/wallet is the Wallet screen too', (tester) async {
+      final state = await makeState();
+      await pumpApp(tester, state, location: '/wallet');
+      expect(find.byType(AccountScreen), findsOneWidget);
+      expect(find.text('WALLET'), findsOneWidget);
     });
 
     testWidgets('addresses of earlier builds lead Home', (tester) async {
@@ -614,49 +742,1339 @@ void main() {
     });
   });
 
-  group('account', () {
-    testWidgets('address, balances and "Back up key"', (tester) async {
+  group('wallet', () {
+    testWidgets('the balance first, then the address; nothing about rounds', (
+      tester,
+    ) async {
       final state = await makeState(chain: FakeChain(dollars: 1000));
       await pumpBody(tester, AccountScreen(state: state, showBar: false));
 
-      expect(find.text('ACCOUNT'), findsOneWidget);
-      expect(find.text(shortAddress(state.address)), findsOneWidget);
+      expect(find.text('WALLET'), findsOneWidget);
+      expect(find.text('ACCOUNT'), findsNothing);
       expect(
         tester.widget<DotMatrixText>(find.byType(DotMatrixText)).text,
         '1,000',
       );
-      expect(find.text('0.03 tBNB'), findsOneWidget);
+      expect(find.text('test USD'), findsOneWidget);
+      // One name for it everywhere: "test BNB", as the sentences say.
+      expect(find.text('0.03 test BNB'), findsOneWidget);
+      expect(find.textContaining('tBNB'), findsNothing);
       expect(find.text('BSC testnet'), findsOneWidget);
+      expect(
+        find.text('Test money on BSC testnet. It has no real value.'),
+        findsOneWidget,
+      );
+      // The gauge nobody could read is gone.
+      expect(find.byType(TickGauge), findsNothing);
+      // The balance is the first thing under the title.
+      expect(
+        tester.getTopLeft(find.byType(BalanceCard)).dy,
+        lessThan(tester.getTopLeft(find.text('Address')).dy),
+      );
 
-      // The key shows only after the person asks for it.
-      final list = find.byType(Scrollable).first;
-      await tester.scrollUntilVisible(
-        find.text('Show private key'),
-        200,
-        scrollable: list,
+      // The list: address, back up, another wallet, about.
+      expect(find.text(shortAddress(state.address)), findsOneWidget);
+      expect(find.text('Back up your key'), findsOneWidget);
+      expect(find.text('Use another wallet'), findsOneWidget);
+      expect(find.text('About'), findsOneWidget);
+      for (final row in tester.widgetList<ActionRow>(find.byType(ActionRow))) {
+        expect(
+          tester.getSize(find.byWidget(row)).height,
+          greaterThanOrEqualTo(48),
+          reason: row.title,
+        );
+      }
+
+      // No round controls here any more, and the key is not on the screen.
+      expect(find.byKey(const Key('round-name')), findsNothing);
+      expect(find.byKey(const Key('open-round')), findsNothing);
+      expect(find.byKey(const Key('round-unlisted')), findsNothing);
+      expect(find.byType(ChipPicker<int>), findsNothing);
+      expect(button('Start round'), findsNothing);
+      expect(button('Open round'), findsNothing);
+      expect(
+        find.textContaining(RegExp('round', caseSensitive: false)),
+        findsNothing,
       );
       expect(find.text(testKeyHex), findsNothing);
-      await tester.tap(find.text('Show private key'));
-      await settle(tester);
-      expect(find.text(testKeyHex), findsOneWidget);
-      expect(button('Copy key'), findsOneWidget);
     });
 
-    testWidgets('"Import a key" takes a pasted key', (tester) async {
+    testWidgets('pressing the address row copies the address', (tester) async {
+      final state = await makeState();
+      await pumpBody(tester, AccountScreen(state: state, showBar: false));
+      await tester.ensureVisible(find.text('Address'));
+      await tester.pump();
+      await tester.tap(find.text('Address'));
+      await settle(tester);
+      expect(bannerNote.value!.text, 'Address copied.');
+    });
+
+    testWidgets('small screen, large text: "Address" and the address whole', (
+      tester,
+    ) async {
+      final state = await makeState();
+      final short = shortAddress(state.address);
+      RenderParagraph paragraph(String text) =>
+          tester.renderObject<RenderParagraph>(find.text(text));
+
+      // Room for both (the test font is wide, so a wide screen): the
+      // address at the right of the title, on its line.
+      await pumpBody(tester, AccountScreen(state: state, showBar: false));
+      tester.view.physicalSize = const Size(480, 844);
+      await settle(tester);
+      final title = tester.getRect(find.text('Address'));
+      final value = tester.getRect(find.text(short));
+      expect(value.left, greaterThan(title.right));
+      expect((value.center.dy - title.center.dy).abs(), lessThan(4));
+
+      // 320 wide with larger text: the two do not fit on one line, so the
+      // address goes under the title. Neither is broken up. (The test font
+      // is about twice as wide as the app's, so 1.1 here is past 1.5 there;
+      // and the screen is tall so the list stays on it.)
+      tester.view.physicalSize = const Size(320, 1400);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.1;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await settle(tester);
+      final oneLine = tester.getSize(find.text('About')).height;
+      expect(tester.getSize(find.text('Address')).height, oneLine);
+      expect(
+        tester.getSize(find.text('Address')).width,
+        greaterThanOrEqualTo(paragraph('Address').getMaxIntrinsicWidth(100)),
+      );
+      expect(paragraph(short).didExceedMaxLines, isFalse);
+      expect(
+        tester.getRect(find.text(short)).top,
+        greaterThanOrEqualTo(tester.getRect(find.text('Address')).bottom),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a screen reader presses each control; the card is no button', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final chain = FakeChain(dollars: 1000);
+      final state = await makeState(chain: chain);
+      await pumpApp(tester, state, location: '/account');
+
+      // "Get test dollars" is a button of its own, not the whole balance
+      // card, and it can be pressed.
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Get test dollars')),
+        isSemantics(
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          isFocusable: true,
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(RegExp('^BALANCE'))),
+        isSemantics(isButton: false, hasTapAction: false),
+      );
+      tester.semantics.tap(find.semantics.byLabel('Get test dollars'));
+      await settle(tester);
+      expect(chain.calls, ['mint 1000']);
+
+      // The bar: each of the three says what it is and can be pressed.
+      for (final label in ['Home', 'Add a round', 'Wallet']) {
+        expect(
+          tester.getSemantics(find.bySemanticsLabel(label)),
+          isSemantics(isButton: true, hasTapAction: true, isFocusable: true),
+          reason: label,
+        );
+      }
+      tester.semantics.tap(find.semantics.byLabel('Add a round'));
+      await settle(tester, 12);
+      expect(find.byType(AddRoundSheet), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('from the keyboard: "Get test dollars", the rows, the bar', (
+      tester,
+    ) async {
+      final chain = FakeChain(dollars: 1000);
+      final state = await makeState(chain: chain);
+      await pumpApp(tester, state, location: '/account');
+
+      await tabTo(tester, 'Get test dollars');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+      expect(chain.calls, ['mint 1000']);
+
+      // The four rows, then the bar: nothing is left out.
+      final passed = await tabTo(tester, 'Add a round');
+      expect(
+        passed,
+        containsAllInOrder([
+          'Address',
+          'Back up your key',
+          'Use another wallet',
+          'About',
+          'Home',
+          'Add a round',
+        ]),
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await settle(tester, 12);
+      expect(find.byType(AddRoundSheet), findsOneWidget);
+    });
+
+    testWidgets('"Get test dollars" mints one deposit, like the join sheet', (
+      tester,
+    ) async {
+      final chain = FakeChain(dollars: 1000, fail: 'mint');
+      final state = await makeState(chain: chain);
+      await pumpBody(tester, AccountScreen(state: state, showBar: false));
+
+      await press(tester, 'Get test dollars');
+      await settle(tester);
+      // A failure is one sentence, and the button is the way on.
+      expect(find.text('The mint was rejected. Try again.'), findsOneWidget);
+      expect(chain.calls, isEmpty);
+      await press(tester, 'Try again');
+      await settle(tester);
+      expect(chain.calls, ['mint 1000']);
+      expect(
+        tester.widget<DotMatrixText>(find.byType(DotMatrixText)).text,
+        '2,000',
+      );
+      expect(bannerNote.value!.text, '1,000 test USD added.');
+      expect(button('Get test dollars'), findsOneWidget);
+    });
+
+    testWidgets('"Get test dollars" waits for the faucet\'s gas', (
+      tester,
+    ) async {
+      final chain = FakeChain(bnb: 0);
+      final state = AppState(
+        store: MemoryStore(key: testKey, onboarded: true),
+        chain: chain,
+        api: FakeServer().api,
+        health: FakeHealth(),
+        clock: () => fixedNow,
+        gasPoll: const Duration(seconds: 3),
+        gasPollTries: 5,
+      );
+      await state.init();
+      await state.refresh();
+      await pumpBody(tester, AccountScreen(state: state, showBar: false));
+
+      await press(tester, 'Get test dollars');
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Preparing your wallet…'), findsOneWidget);
+      expect(
+        find.text('Preparing your wallet: a little test BNB is on its way.'),
+        findsOneWidget,
+      );
+      expect(chain.calls, isEmpty, reason: 'nothing is sent without gas');
+      chain.bnb = usd(0.03);
+      await tester.pump(const Duration(seconds: 3));
+      await settle(tester);
+      expect(chain.calls, ['mint 1000']);
+    });
+
+    testWidgets('the back-up sheet hides the key every time it opens', (
+      tester,
+    ) async {
+      final state = await makeState();
+      await pumpApp(tester, state, location: '/account');
+
+      Future<void> open() async {
+        await tester.ensureVisible(find.text('Back up your key'));
+        await tester.pump();
+        await tester.tap(find.text('Back up your key'));
+        await settle(tester, 12);
+      }
+
+      await open();
+      expect(find.byType(BackupKeySheet), findsOneWidget);
+      // On the darker palette, so its sentences keep their contrast.
+      expect(
+        tester.widget<SheetFrame>(find.byType(SheetFrame)).palette,
+        AuroraPalette.ink,
+      );
+      expect(
+        find.text(
+          'This key is the wallet. The app keeps it on this device and '
+          'nowhere else. If you delete the app or clear this site\'s data '
+          'without a copy, the wallet is gone.',
+        ),
+        findsOneWidget,
+      );
+      // The key shows only after the person asks for it.
+      final toggle = find.byKey(const Key('backup-show'));
+      expect(
+        find.descendant(of: toggle, matching: find.text('Show key')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: toggle,
+          matching: find.text(
+            'Anyone who sees it can take what is in this wallet.',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text(testKeyHex), findsNothing);
+      expect(button('Copy key'), findsNothing);
+      await tester.tap(toggle);
+      await settle(tester);
+      expect(find.text(testKeyHex), findsOneWidget);
+      await tester.tap(button('Copy key'));
+      await settle(tester);
+      expect(bannerNote.value!.text, 'Key copied.');
+
+      // Closed and opened again: hidden again.
+      bannerNote.value = null; // the banner is over the barrier's top edge
+      await tester.pump();
+      await tester.tapAt(const Offset(195, 20));
+      await settle(tester, 12);
+      expect(find.byType(BackupKeySheet), findsNothing);
+      expect(find.text(testKeyHex), findsNothing);
+      await open();
+      expect(find.byType(BackupKeySheet), findsOneWidget);
+      expect(find.text(testKeyHex), findsNothing);
+      expect(tester.widget<CapsuleToggle>(toggle).value, isFalse);
+    });
+
+    testWidgets('"Use another wallet" takes a pasted key', (tester) async {
       final store = MemoryStore(key: testKey, onboarded: true);
       final state = await makeState(store: store);
-      await pumpBody(tester, ImportKeySheet(state: state));
+      await pumpApp(tester, state, location: '/account');
+      await tester.ensureVisible(find.text('Use another wallet'));
+      await tester.pump();
+      await tester.tap(find.text('Use another wallet'));
+      await settle(tester, 12);
+      expect(find.byType(ImportKeySheet), findsOneWidget);
+      expect(
+        tester.widget<SheetFrame>(find.byType(SheetFrame)).palette,
+        AuroraPalette.ink,
+      );
+      // Where the pasted key is kept, in the back-up sheet's own words.
+      expect(
+        find.text(
+          'Paste a private key (64 hex characters). It replaces the wallet '
+          'on this device. The app keeps it on this device and nowhere else. '
+          'Back up the current key first if you still need it.',
+        ),
+        findsOneWidget,
+      );
+      // The placeholder is read like the app's other quiet sentences.
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('import-key')))
+            .decoration!
+            .hintStyle!
+            .color,
+        AppColors.dark.text2,
+      );
 
-      expect(enabled(tester, 'Import'), isFalse);
+      expect(enabled(tester, 'Replace wallet'), isFalse);
       await tester.enterText(find.byKey(const Key('import-key')), 'zz' * 32);
       await settle(tester);
-      await tester.tap(button('Import'));
+      await tester.tap(button('Replace wallet'));
       await settle(tester);
       expect(find.textContaining('That is not a private key'), findsOneWidget);
       expect(store.key!.address, testKey.address);
     });
 
-    testWidgets('"Start a new round": the form, then the invite sheet', (
+    testWidgets('"About" says what a check-in proves, and names Flap', (
+      tester,
+    ) async {
+      final state = await makeState();
+      await pumpApp(tester, state, location: '/account');
+      await tester.ensureVisible(find.text('About'));
+      await tester.pump();
+      await tester.tap(find.text('About'));
+      await settle(tester, 12);
+      expect(find.byType(AboutSheet), findsOneWidget);
+      expect(
+        tester.widget<SheetFrame>(find.byType(SheetFrame)).palette,
+        AuroraPalette.ink,
+      );
+      expect(find.text('Built on Flap'), findsOneWidget);
+      expect(
+        find.textContaining('is not run or endorsed by Flap.'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Check-ins are attested, not proven:'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('scrolled to the end, the list ends above the tab bar', (
+      tester,
+    ) async {
+      final state = await makeState();
+      usePhone(tester, size: const Size(390, 560));
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: inAppTheme,
+          routerConfig: buildRouter(state, initialLocation: '/account'),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: AppBackdrop(child: child!),
+          ),
+        ),
+      );
+      await settle(tester, 12);
+      final list = find.byKey(const Key('wallet-list'));
+      expect(
+        tester
+            .state<ScrollableState>(
+              find
+                  .descendant(of: list, matching: find.byType(Scrollable))
+                  .first,
+            )
+            .position
+            .maxScrollExtent,
+        greaterThan(0),
+        reason: 'the screen is short enough to scroll',
+      );
+      await tester.drag(list, const Offset(0, -3000));
+      await settle(tester, 12);
+      expect(
+        tester.getBottomLeft(find.byKey(const Key('wallet-about'))).dy,
+        lessThanOrEqualTo(tester.getTopLeft(find.byType(FloatingTabBar)).dy),
+      );
+    });
+  });
+
+  group('add a round', () {
+    testWidgets('"+" opens the sheet and is never the selected place', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final state = await makeState();
+      await pumpApp(tester, state);
+
+      FloatingTabBar bar() =>
+          tester.widget<FloatingTabBar>(find.byType(FloatingTabBar));
+      expect(bar().items.map((i) => i.label), [
+        'Home',
+        'Add a round',
+        'Wallet',
+      ]);
+      expect(bar().items.map((i) => i.action), [false, true, false]);
+      expect(bar().current, MainTabs.home);
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Add a round')),
+        isSemantics(
+          isButton: true,
+          hasTapAction: true,
+          hasSelectedState: false,
+        ),
+      );
+
+      await tester.tap(find.byTooltip('Add a round'));
+      await settle(tester, 12);
+      // The sheet: two rows, nothing else.
+      expect(find.byType(AddRoundSheet), findsOneWidget);
+      expect(
+        tester.widget<SheetFrame>(find.byType(SheetFrame)).palette,
+        AuroraPalette.ink,
+      );
+      expect(find.text('Add a round'), findsOneWidget);
+      expect(find.byType(ActionRow), findsNWidgets(2));
+      expect(find.text('Start a round'), findsOneWidget);
+      expect(
+        find.text('Set the deposit and the goal, then invite people.'),
+        findsOneWidget,
+      );
+      expect(find.text('Open an invite link'), findsOneWidget);
+      expect(find.text('Paste a link someone sent you.'), findsOneWidget);
+      final sheet = find.byType(AddRoundSheet);
+      expect(
+        find.descendant(of: sheet, matching: find.byType(PillButton)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: sheet, matching: find.byType(TextField)),
+        findsNothing,
+      );
+
+      // Still on Home, and Home is still the selected place.
+      await tester.tapAt(const Offset(195, 20));
+      await settle(tester, 12);
+      expect(find.byType(AddRoundSheet), findsNothing);
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(bar().current, MainTabs.home);
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Home')),
+        isSemantics(hasSelectedState: true, isSelected: true),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Add a round')),
+        isSemantics(
+          isButton: true,
+          hasTapAction: true,
+          hasSelectedState: false,
+        ),
+      );
+
+      // The same from Wallet: it opens over the place you are on.
+      await tester.tap(find.byTooltip('Wallet'));
+      await settle(tester, 12);
+      await tester.tap(find.byTooltip('Add a round'));
+      await settle(tester, 12);
+      expect(find.byType(AddRoundSheet), findsOneWidget);
+      await tester.tapAt(const Offset(195, 20));
+      await settle(tester, 12);
+      expect(find.byType(AccountScreen), findsOneWidget);
+      expect(bar().current, MainTabs.wallet);
+      semantics.dispose();
+    });
+
+    testWidgets('"Start a round" opens /new: no tab bar, Back returns', (
+      tester,
+    ) async {
+      final state = await makeState();
+      await pumpApp(tester, state, location: '/account');
+      await tester.tap(find.byTooltip('Add a round'));
+      await settle(tester, 12);
+      await tester.tap(find.text('Start a round'));
+      await settle(tester, 12);
+
+      expect(find.byType(AddRoundSheet), findsNothing);
+      expect(find.byType(NewRoundScreen), findsOneWidget);
+      expect(find.text('NEW ROUND'), findsOneWidget);
+      expect(find.byType(FloatingTabBar), findsNothing);
+      expect(find.byType(MainTabs), findsNothing);
+      // Back leads to where the person came from.
+      await tester.tap(find.byTooltip('Back'));
+      await settle(tester, 12);
+      expect(find.byType(NewRoundScreen), findsNothing);
+      expect(find.byType(AccountScreen), findsOneWidget);
+    });
+
+    testWidgets('/new opened directly: no tab bar, and Back leads Home', (
+      tester,
+    ) async {
+      final state = await makeState();
+      await pumpApp(tester, state, location: '/new');
+      expect(find.byType(NewRoundScreen), findsOneWidget);
+      expect(find.byType(FloatingTabBar), findsNothing);
+      await tester.tap(find.byTooltip('Back'));
+      await settle(tester, 12);
+      expect(find.byType(HomeScreen), findsOneWidget);
+    });
+
+    testWidgets('/new on a new device starts at onboarding', (tester) async {
+      final state = await makeState(wallet: false, store: MemoryStore());
+      await pumpApp(tester, state, location: '/new');
+      expect(find.byType(OnboardingScreen), findsOneWidget);
+      expect(find.byType(NewRoundScreen), findsNothing);
+    });
+
+    testWidgets('"Open an invite link" takes a pasted link or address', (
+      tester,
+    ) async {
+      final server = FakeServer()
+        ..more.add(roundJson(at: launcherB, name: 'Night Owls'));
+      server.unlisted.add(launcherB);
+      final state = await makeState(server: server);
+      await pumpApp(tester, state);
+      await tester.tap(find.byTooltip('Add a round'));
+      await settle(tester, 12);
+      await tester.tap(find.text('Open an invite link'));
+      await settle(tester, 12);
+
+      // The same sheet, now the link form.
+      expect(find.byType(OpenLinkForm), findsOneWidget);
+      expect(find.text('Open an invite link'), findsOneWidget);
+      expect(find.text('INVITE LINK'), findsOneWidget);
+      expect(find.text('Paste the link'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('open-round')))
+            .decoration!
+            .hintStyle!
+            .color,
+        AppColors.dark.text2,
+      );
+      expect(find.text('Start a round'), findsNothing);
+      expect(enabled(tester, 'Open round'), isFalse);
+
+      await tester.enterText(find.byKey(const Key('open-round')), 'hello');
+      await settle(tester);
+      await tester.tap(button('Open round'));
+      await settle(tester);
+      expect(
+        find.text(
+          'That isn\'t a round link. Paste the whole link, or the round\'s '
+          'address.',
+        ),
+        findsOneWidget,
+      );
+
+      // An address our factory never made: said in the sheet, next to the
+      // field, and not a second time in the banner.
+      await tester.enterText(find.byKey(const Key('open-round')), launcherD);
+      await settle(tester);
+      await tester.tap(button('Open round'));
+      await settle(tester, 12);
+      expect(find.text('That link does not lead to a round.'), findsOneWidget);
+      expect(bannerNote.value, isNull);
+      expect(state.selected, launcher);
+      expect(find.byType(OpenLinkForm), findsOneWidget);
+
+      // A link to an unlisted round opens it: the sheet closes on Home with
+      // that round selected.
+      await tester.enterText(
+        find.byKey(const Key('open-round')),
+        'https://run.example/#/r/${launcherB.toUpperCase().replaceFirst('0X', '0x')}',
+      );
+      await settle(tester);
+      await tester.tap(button('Open round'));
+      await settle(tester, 12);
+      expect(state.selected, launcherB);
+      expect(state.round!.name, 'Night Owls');
+      expect(bannerNote.value!.text, 'Round opened.');
+      expect(find.byType(AddRoundSheet), findsNothing);
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(button('Join Night Owls · 1,000 USD'), findsOneWidget);
+    });
+
+    testWidgets('a link opened from Wallet ends on Home', (tester) async {
+      final server = FakeServer()
+        ..more.add(roundJson(at: launcherB, name: 'Night Owls'));
+      final state = await makeState(server: server);
+      await pumpApp(tester, state, location: '/account');
+      await tester.tap(find.byTooltip('Add a round'));
+      await settle(tester, 12);
+      await tester.tap(find.text('Open an invite link'));
+      await settle(tester, 12);
+      await tester.enterText(find.byKey(const Key('open-round')), launcherB);
+      await settle(tester);
+      await tester.tap(button('Open round'));
+      await settle(tester, 12);
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(state.selected, launcherB);
+    });
+  });
+
+  group('new round', () {
+    test('"The deal" is worked out in money from the choices', () {
+      expect(
+        NewRoundScreen.dealLines(
+          deposit: 1000,
+          bps: 3000,
+          goal: 6,
+          daysOpen: 7,
+        ),
+        [
+          'Join: 1,000 USD each, paid once.',
+          'Prize: 700 USD of each deposit, shared by days shown up.',
+          'Token pool: 300 USD of each deposit.',
+          'Token: half the supply and most of the trading tax, shared by '
+              'days shown up.',
+          'Launch: once the group has 6 check-ins, anyone can launch the '
+              'token.',
+          'No launch in 7 days: every deposit goes back.',
+        ],
+      );
+      expect(
+        NewRoundScreen.floorLine(deposit: 1000, bps: 3000),
+        'Flap needs 1,500 USD in the pool to launch: 5 people at this '
+        'deposit, or a sponsor.',
+      );
+      expect(
+        NewRoundScreen.dealLines(
+          deposit: 2000,
+          bps: 5000,
+          goal: 30,
+          daysOpen: 1,
+        ),
+        [
+          'Join: 2,000 USD each, paid once.',
+          'Prize: 1,000 USD of each deposit, shared by days shown up.',
+          'Token pool: 1,000 USD of each deposit.',
+          'Token: half the supply and most of the trading tax, shared by '
+              'days shown up.',
+          'Launch: once the group has 30 check-ins, anyone can launch the '
+              'token.',
+          'No launch in 1 day: every deposit goes back.',
+        ],
+      );
+      expect(
+        NewRoundScreen.floorLine(deposit: 2000, bps: 5000),
+        'Flap needs 1,500 USD in the pool to launch: 2 people at this '
+        'deposit, or a sponsor.',
+      );
+      // The whole deposit in the pool: one line says there is no prize and
+      // where the deposit goes, instead of "0 USD ... shared" and a
+      // "Token pool" line that repeats the deposit.
+      expect(
+        NewRoundScreen.dealLines(
+          deposit: 2000,
+          bps: 10000,
+          goal: 3,
+          daysOpen: 30,
+        ),
+        [
+          'Join: 2,000 USD each, paid once.',
+          'Prize: none. The whole deposit goes to the token pool.',
+          'Token: half the supply and most of the trading tax, shared by '
+              'days shown up.',
+          'Launch: once the group has 3 check-ins, anyone can launch the '
+              'token.',
+          'No launch in 30 days: every deposit goes back.',
+        ],
+      );
+      expect(
+        NewRoundScreen.floorLine(deposit: 2000, bps: 10000),
+        'Flap needs 1,500 USD in the pool to launch: 1 person at this '
+        'deposit, or a sponsor.',
+      );
+      expect(NewRoundScreen.membersForFloor(deposit: 100, bps: 1000), 150);
+      // No percentages in the deal, and the token share is said at every
+      // split: it does not depend on the split.
+      for (final bps in NewRoundScreen.poolOptions) {
+        final lines = NewRoundScreen.dealLines(
+          deposit: 500,
+          bps: bps,
+          goal: 6,
+          daysOpen: 7,
+        );
+        for (final line in lines) {
+          expect(line.contains('%'), isFalse, reason: line);
+        }
+        expect(lines.where((l) => l.startsWith('Token: ')), [
+          'Token: half the supply and most of the trading tax, shared by '
+              'days shown up.',
+        ], reason: '$bps');
+      }
+    });
+
+    testWidgets('one job: the name, three choices, the deal, one button', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final state = await makeState();
+      await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
+
+      expect(find.text('NEW ROUND'), findsOneWidget);
+      expect(find.byTooltip('Back'), findsOneWidget);
+      expect(find.byType(FloatingTabBar), findsNothing);
+      expect(find.text('Morning Movers'), findsOneWidget); // the placeholder
+      // The name is public and for good: the field says so.
+      expect(find.text('NAME'), findsOneWidget);
+      expect(
+        find.text(
+          'Also the name of the token. It can\'t be changed after you start.',
+        ),
+        findsOneWidget,
+      );
+      // Each choice says what it does. "test USD" is said once, in the
+      // label, not on every chip.
+      expect(find.text('DEPOSIT · TEST USD'), findsOneWidget);
+      expect(find.text('Each person pays this once to join.'), findsOneWidget);
+      expect(find.text('GOAL'), findsOneWidget);
+      expect(
+        find.text(
+          'Check-ins the group needs to launch the token. One per person '
+          'per day.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('RUNS FOR'), findsOneWidget);
+      expect(
+        find.text(
+          'If the goal isn\'t reached by then, every deposit goes back.',
+        ),
+        findsOneWidget,
+      );
+      List<String> chips(String key) => [
+        for (final chip in tester.widgetList<AppChip>(
+          find.descendant(
+            of: find.byKey(Key(key)),
+            matching: find.byType(AppChip),
+          ),
+        ))
+          chip.text,
+      ];
+      expect(chips('round-deposit'), ['100', '500', '1,000', '2,000']);
+      expect(chips('round-goal'), ['3', '6', '12', '30', '60']);
+      expect(chips('round-days'), [
+        '1 day',
+        '3 days',
+        '7 days',
+        '14 days',
+        '30 days',
+      ]);
+      // A chip is a full touch target.
+      for (final chip in find.byType(AppChip).evaluate()) {
+        expect(chip.size!.height, greaterThanOrEqualTo(44));
+        expect(chip.size!.width, greaterThanOrEqualTo(44));
+      }
+
+      // "More options" is closed, says so, and says what is inside.
+      expect(find.text('More options'), findsOneWidget);
+      expect(find.text('Token pool 30% · Listed'), findsOneWidget);
+      expect(find.text('TOKEN POOL'), findsNothing);
+      expect(find.byKey(const Key('round-unlisted')), findsNothing);
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(RegExp('^More options'))),
+        isSemantics(
+          isButton: true,
+          hasExpandedState: true,
+          isExpanded: false,
+          hasTapAction: true,
+        ),
+      );
+
+      // The deal for the defaults, in money, one line each.
+      for (final line in [
+        'Join: 1,000 USD each, paid once.',
+        'Prize: 700 USD of each deposit, shared by days shown up.',
+        'Token pool: 300 USD of each deposit.',
+        'Token: half the supply and most of the trading tax, shared by days '
+            'shown up.',
+        'Launch: once the group has 6 check-ins, anyone can launch the token.',
+        'No launch in 7 days: every deposit goes back.',
+        'Flap needs 1,500 USD in the pool to launch: 5 people at this '
+            'deposit, or a sponsor.',
+      ]) {
+        expect(find.text(line), findsOneWidget, reason: line);
+      }
+      expect(find.text('THE DEAL'), findsOneWidget);
+
+      // For a screen reader each control is one thing with its own press:
+      // the back control, a chip with and without a spoken name, the
+      // button. Each label and its sentence are read together, just before
+      // their control; the deal is read as one.
+      for (final label in [
+        'Back',
+        '1,000 test USD',
+        '6 check-ins',
+        '7 days',
+        'Start round',
+      ]) {
+        expect(
+          tester.getSemantics(find.bySemanticsLabel(label)),
+          isSemantics(isButton: true, hasTapAction: true, isFocusable: true),
+          reason: label,
+        );
+      }
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('6 check-ins')),
+        isSemantics(hasSelectedState: true, isSelected: true),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('12 check-ins')),
+        isSemantics(hasSelectedState: true, isSelected: false),
+      );
+      expect(
+        find.bySemanticsLabel(
+          'NAME\nAlso the name of the token. It can\'t be changed after you '
+          'start.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          'GOAL\nCheck-ins the group needs to launch the token. One per '
+          'person per day.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          RegExp(r'^THE DEAL\nJoin: 1,000 USD each, paid once\.\n'),
+        ),
+        findsOneWidget,
+      );
+      // A press from the screen reader changes the choice.
+      tester.semantics.tap(find.semantics.byLabel('12 check-ins'));
+      await settle(tester);
+      expect(
+        find.text(
+          'Launch: once the group has 12 check-ins, anyone can launch the '
+          'token.',
+        ),
+        findsOneWidget,
+      );
+      // The example name is fainter than a typed one would be.
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('round-name')))
+            .decoration!
+            .hintStyle!
+            .color,
+        AppColors.dark.text3,
+      );
+
+      // One button, pinned under the form, with what it costs.
+      expect(find.byType(PillButton), findsOneWidget);
+      expect(button('Start round'), findsOneWidget);
+      expect(
+        find.text(
+          'Costs about 0.007 test BNB in fees. You join from Home like '
+          'everyone else.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getTopLeft(button('Start round')).dy,
+        greaterThan(844 / 2),
+        reason: 'pinned at the bottom',
+      );
+      semantics.dispose();
+    });
+
+    testWidgets('the deal follows the choices, "More options" included', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final state = await makeState();
+      await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
+
+      await pick(tester, 'round-deposit', '500');
+      await pick(tester, 'round-goal', '12');
+      await pick(tester, 'round-days', '3 days');
+      for (final line in [
+        'Join: 500 USD each, paid once.',
+        'Prize: 350 USD of each deposit, shared by days shown up.',
+        'Token pool: 150 USD of each deposit.',
+        'Token: half the supply and most of the trading tax, shared by days '
+            'shown up.',
+        'Launch: once the group has 12 check-ins, anyone can launch the '
+            'token.',
+        'No launch in 3 days: every deposit goes back.',
+        'Flap needs 1,500 USD in the pool to launch: 10 people at this '
+            'deposit, or a sponsor.',
+      ]) {
+        expect(find.text(line), findsOneWidget, reason: line);
+      }
+
+      // "More options" opens from the keyboard: Tab to it, Enter.
+      String? focused() => FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<ActionRow>()
+          ?.title;
+      for (var i = 0; i < 24 && focused() != 'More options'; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+      }
+      expect(focused(), 'More options');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+      expect(
+        tester.getSemantics(find.bySemanticsLabel(RegExp('^More options'))),
+        isSemantics(hasExpandedState: true, isExpanded: true),
+      );
+      expect(find.text('TOKEN POOL'), findsOneWidget);
+      expect(
+        find.text(
+          'The part of each deposit that backs the token at launch. The '
+          'rest is the prize.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widgetList<AppChip>(
+              find.descendant(
+                of: find.byKey(const Key('round-pool')),
+                matching: find.byType(AppChip),
+              ),
+            )
+            .map((c) => (c.text, c.selected)),
+        [('10%', false), ('30%', true), ('50%', false), ('100%', false)],
+      );
+      // The existing switch, with its existing words.
+      final toggle = find.byKey(const Key('round-unlisted'));
+      expect(
+        find.descendant(of: toggle, matching: find.text('Unlisted')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: toggle, matching: find.text(unlistedNoteText)),
+        findsOneWidget,
+      );
+
+      // For a screen reader the switch is one thing: its name, what it
+      // means, whether it is on, and a press of its own.
+      final unlisted = find.bySemanticsLabel('Unlisted. $unlistedNoteText');
+      expect(
+        tester.getSemantics(unlisted),
+        isSemantics(
+          hasToggledState: true,
+          isToggled: false,
+          hasTapAction: true,
+          isFocusable: true,
+        ),
+      );
+      tester.semantics.tap(
+        find.semantics.byLabel('Unlisted. $unlistedNoteText'),
+      );
+      await settle(tester);
+      expect(tester.getSemantics(unlisted), isSemantics(isToggled: true));
+      expect(find.text('Token pool 30% · Unlisted'), findsOneWidget);
+      tester.semantics.tap(
+        find.semantics.byLabel('Unlisted. $unlistedNoteText'),
+      );
+      await settle(tester);
+      expect(
+        tester.getSemantics(
+          find.bySemanticsLabel('30% of each deposit to the token pool'),
+        ),
+        isSemantics(isButton: true, isSelected: true, hasTapAction: true),
+      );
+
+      await pick(tester, 'round-pool', '100%');
+      expect(find.text('Token pool 100% · Listed'), findsOneWidget);
+      expect(
+        find.text('Prize: none. The whole deposit goes to the token pool.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Token pool: '), findsNothing);
+      // The token share is the same line as at every other split.
+      expect(
+        find.text(
+          'Token: half the supply and most of the trading tax, shared by '
+          'days shown up.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Flap needs 1,500 USD in the pool to launch: 3 people at this '
+          'deposit, or a sponsor.',
+        ),
+        findsOneWidget,
+      );
+      semantics.dispose();
+    });
+
+    testWidgets('no name: one sentence by the field, and the cursor in it', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final chain = FakeChain();
+      final state = await makeState(chain: chain);
+      await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
+
+      TextField name() =>
+          tester.widget<TextField>(find.byKey(const Key('round-name')));
+      expect(name().focusNode!.hasFocus, isFalse);
+      await press(tester, 'Start round');
+      await settle(tester);
+      expect(find.text('Give your round a name.'), findsOneWidget);
+      expect(name().focusNode!.hasFocus, isTrue);
+      expect(chain.calls, isEmpty);
+      // Announced by itself: the sentence is its own node, not the form.
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('Give your round a name.')),
+        isSemantics(isLiveRegion: true),
+      );
+      // Next to the field, not down by the button; and the button is still
+      // "Start round": nothing failed.
+      final field = tester.getRect(find.byKey(const Key('round-name')));
+      final said = tester.getRect(find.text('Give your round a name.'));
+      expect(said.top, greaterThan(field.bottom));
+      expect(said.top - field.bottom, lessThan(40));
+      expect(button('Start round'), findsOneWidget);
+      expect(button('Try again'), findsNothing);
+
+      // Only spaces is no name either.
+      await tester.enterText(find.byKey(const Key('round-name')), '   ');
+      await settle(tester);
+      expect(find.text('Give your round a name.'), findsNothing);
+      await press(tester, 'Start round');
+      await settle(tester);
+      expect(find.text('Give your round a name.'), findsOneWidget);
+      expect(chain.calls, isEmpty);
+      semantics.dispose();
+    });
+
+    testWidgets('the whole form works from the keyboard, in reading order', (
+      tester,
+    ) async {
+      final chain = FakeChain();
+      final state = await makeState(chain: chain);
+      await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
+
+      // Tab goes through the form top to bottom and reaches the pinned
+      // button last, wherever the form is scrolled to.
+      final order = await tabTo(tester, 'Start round');
+      expect(order, [
+        'Back',
+        "[<'round-name'>]",
+        '100 test USD',
+        '500 test USD',
+        '1,000 test USD',
+        '2,000 test USD',
+        '3 check-ins',
+        '6 check-ins',
+        '12 check-ins',
+        '30 check-ins',
+        '60 check-ins',
+        '1 day',
+        '3 days',
+        '7 days',
+        '14 days',
+        '30 days',
+        'More options',
+        'Start round',
+      ]);
+      // Where the keyboard is shows: a ring on the button.
+      expect(
+        find.descendant(
+          of: button('Start round'),
+          matching: find.byWidgetPredicate(
+            (w) => w is CustomPaint && w.foregroundPainter != null,
+          ),
+        ),
+        findsOneWidget,
+      );
+      // Enter on the button is a press: no name yet, so it says so and the
+      // cursor goes to the field.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+      expect(find.text('Give your round a name.'), findsOneWidget);
+      expect(focusedName(), "[<'round-name'>]");
+      expect(chain.calls, isEmpty);
+
+      // Space chooses a chip.
+      await tabTo(tester, '500 test USD');
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await settle(tester);
+      expect(find.text('Join: 500 USD each, paid once.'), findsOneWidget);
+
+      // "More options" opens, and what is in it is reached the same way.
+      await tabTo(tester, 'More options');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+      await tabTo(tester, '50% of each deposit to the token pool');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+      expect(find.text('Token pool 50% · Listed'), findsOneWidget);
+      await tabTo(tester, 'Unlisted. $unlistedNoteText');
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await settle(tester);
+      expect(find.text('Token pool 50% · Unlisted'), findsOneWidget);
+
+      // Typing in the name field and Enter does not start anything: the
+      // name is for good, so the round starts from its button only.
+      await tester.enterText(find.byKey(const Key('round-name')), 'Night Owls');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      expect(chain.calls, isEmpty);
+      await tabTo(tester, 'Start round');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester, 12);
+      expect(chain.calls, ['createRound Night Owls NO 500 5000 6']);
+    });
+
+    testWidgets('small phone, keyboard up: the name and its error stay in '
+        'sight', (tester) async {
+      final state = await makeState();
+      await pumpNewRound(tester, state);
+      tester.view.physicalSize = const Size(320, 568);
+      await settle(tester);
+
+      final field = find.byKey(const Key('round-name'));
+      final bar = find.byKey(const Key('new-round-action'));
+      const fee =
+          'Costs about 0.007 test BNB in fees. You join from Home like '
+          'everyone else.';
+      expect(find.text(fee), findsOneWidget);
+      // Where the pinned action stops being see-through.
+      double opaqueFrom() => tester.getRect(bar).top + BottomFade.defaultRise;
+      // The list ends there: nothing of it is behind the button.
+      expect(
+        tester.getRect(find.byKey(const Key('new-round-list'))).bottom,
+        moreOrLessEquals(opaqueFrom(), epsilon: 0.5),
+      );
+
+      // The cursor in the field and the keyboard up.
+      await tester.tap(field);
+      await settle(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 253);
+      await settle(tester, 12);
+      // The bar is the button alone now, on top of the keyboard.
+      expect(find.text(fee), findsNothing);
+      expect(tester.getRect(bar).bottom, moreOrLessEquals(568 - 253));
+      expect(tester.getRect(button('Start round')).bottom, lessThan(568 - 253));
+      // The field is above the bar, fade included: it can be read while
+      // typing.
+      expect(tester.getRect(field).top, greaterThan(0));
+      expect(
+        tester.getRect(field).bottom,
+        lessThanOrEqualTo(tester.getRect(bar).top),
+      );
+
+      // No name: the sentence shows above the bar too, with its field.
+      await tester.tap(button('Start round'));
+      await settle(tester, 12);
+      final said = tester.getRect(find.text('Give your round a name.'));
+      expect(said.bottom, lessThanOrEqualTo(tester.getRect(bar).top + 0.5));
+      expect(tester.getRect(field).top, greaterThan(0));
+      expect(tester.getRect(field).bottom, lessThan(said.top));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'too little test BNB: the sentence says where more comes from',
+      (tester) async {
+        // The faucet has filled this wallet before; it does not again.
+        final chain = FakeChain(bnb: 0.001);
+        final state = await makeState(chain: chain);
+        await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
+        await tester.enterText(
+          find.byKey(const Key('round-name')),
+          'Night Owls',
+        );
+        await settle(tester);
+        await press(tester, 'Start round');
+        await settle(tester, 12);
+        expect(
+          find.text(
+            'Starting a round needs about 0.007 test BNB in fees and this '
+            'wallet has less. Send test BNB to your address (Wallet, then '
+            'Address), then try again.',
+          ),
+          findsOneWidget,
+        );
+        expect(chain.calls, isEmpty);
+        // With more in the wallet, the button is the way on.
+        chain.bnb = usd(0.03);
+        await press(tester, 'Try again');
+        await settle(tester, 12);
+        expect(chain.calls, ['createRound Night Owls NO 1000 3000 6']);
+      },
+    );
+
+    testWidgets('started from Home: Home does not read again under the '
+        'screen, so the new round stays selected', (tester) async {
+      final chain = SlowChain();
+      final server = FakeServer()
+        ..more.add(roundJson(at: createdLauncher, name: 'Night Owls'));
+      server.unlisted.add(createdLauncher);
+      final state = await makeState(chain: chain, server: server);
+      // Home, with the new-round screen pushed over it: Home stays alive
+      // underneath, as it does behind the "+".
+      usePhone(tester);
+      final router = GoRouter(
+        initialLocation: '/',
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => HomeScreen(state: state),
+          ),
+          GoRoute(
+            path: '/new',
+            builder: (_, _) => NewRoundScreen(state: state, missing: const []),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: inAppTheme,
+          routerConfig: router,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: AppBackdrop(child: child!),
+          ),
+        ),
+      );
+      await settle(tester, 12);
+      unawaited(router.push('/new'));
+      await settle(tester, 12);
+      expect(find.byType(NewRoundScreen), findsOneWidget);
+      expect(find.byType(HomeScreen, skipOffstage: false), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('round-name')), 'Night Owls');
+      await settle(tester);
+      // The round is on its way to the chain, and stays there for a while.
+      chain.holdCreate = Completer<void>();
+      chain.holdMember = Completer<void>();
+      final reads = server.count('GET /rounds');
+      await press(tester, 'Start round');
+      await settle(tester);
+      expect(find.text('Starting your round…'), findsOneWidget);
+      // Home's twenty seconds pass. A read started now would list the
+      // rounds as they were and, finishing after the round is started, put
+      // the list back without it.
+      await tester.pump(const Duration(seconds: 21));
+      await settle(tester);
+      expect(server.count('GET /rounds'), reads, reason: 'no read under /new');
+      chain.holdCreate!.complete();
+      await settle(tester, 12);
+      chain.holdMember!.complete();
+      await settle(tester, 12);
+
+      expect(state.rounds.map((r) => r.id), contains(createdLauncher));
+      expect(state.selected, createdLauncher);
+      // The invite sheet opened by itself; under it, the done state.
+      expect(find.byType(InviteSheet), findsOneWidget);
+      await tester.tapAt(const Offset(195, 20));
+      await settle(tester, 12);
+      expect(find.text('ROUND STARTED'), findsOneWidget);
+      expect(enabled(tester, 'Invite people'), isTrue);
+      await press(tester, 'Go to round');
+      await settle(tester, 12);
+      expect(find.byType(NewRoundScreen), findsNothing);
+      expect(state.selected, createdLauncher);
+      expect(button('Join Night Owls · 1,000 USD'), findsOneWidget);
+    });
+
+    testWidgets('"Go to round" opens Home on the new round, whatever is '
+        'selected by then', (tester) async {
+      final server = FakeServer()
+        ..more.add(roundJson(at: createdLauncher, name: 'Night Owls'));
+      final state = await makeState(server: server);
+      await pumpNewRound(tester, state);
+      await tester.enterText(find.byKey(const Key('round-name')), 'Night Owls');
+      await settle(tester);
+      await press(tester, 'Start round');
+      await settle(tester, 12);
+      await tester.tapAt(const Offset(195, 20));
+      await settle(tester, 12);
+      expect(find.text('ROUND STARTED'), findsOneWidget);
+      // Something else moved the selection while this screen was open.
+      state.select(launcher);
+      await settle(tester);
+      expect(state.selected, launcher);
+      await press(tester, 'Go to round');
+      await settle(tester, 12);
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(state.selected, createdLauncher);
+    });
+
+    testWidgets('a failure is one sentence and the button says Try again', (
+      tester,
+    ) async {
+      final chain = FakeChain(fail: 'createRound');
+      final server = FakeServer()
+        ..more.add(roundJson(at: createdLauncher, name: 'Night Owls'));
+      server.unlisted.add(createdLauncher);
+      final state = await makeState(chain: chain, server: server);
+      await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
+
+      await tester.enterText(find.byKey(const Key('round-name')), 'Night Owls');
+      await settle(tester);
+      await press(tester, 'Start round');
+      await settle(tester, 12);
+      expect(
+        find.text('The createRound was rejected. Try again.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Exception'), findsNothing);
+      expect(button('Start round'), findsNothing);
+      expect(find.text('ROUND STARTED'), findsNothing);
+      await press(tester, 'Try again');
+      await settle(tester, 12);
+      expect(chain.calls, ['createRound Night Owls NO 1000 3000 6']);
+      expect(state.selected, createdLauncher);
+    });
+
+    testWidgets('started: the round by its name, invite, and on to Home', (
       tester,
     ) async {
       final chain = FakeChain();
@@ -666,33 +2084,20 @@ void main() {
       server.unlisted.add(createdLauncher); // not shown until registered
       final state = await makeState(chain: chain, server: server);
       expect(state.rounds, hasLength(1));
-      await pumpBody(
-        tester,
-        SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: StartRoundForm(state: state, missing: const []),
-        ),
-      );
-
-      // The defaults: 1,000 USD, 30% to the pool, 6 check-ins, 7 days.
-      expect(
-        find.textContaining('Flap needs 1,500 USD in the pool: 5 members'),
-        findsOneWidget,
-      );
-      await tester.ensureVisible(button('Start the round'));
-      await tester.tap(button('Start the round'));
-      await settle(tester);
-      expect(find.text('Give the round a name first.'), findsOneWidget);
-      expect(chain.calls, isEmpty);
+      await pumpNewRound(tester, state);
 
       await tester.enterText(
         find.byKey(const Key('round-name')),
         'Lumpini Striders',
       );
-      await tester.ensureVisible(button('Retry'));
-      await tester.tap(button('Retry'));
+      await settle(tester);
+      await press(tester, 'Start round');
       await settle(tester, 12);
+      // The defaults: 1,000 USD, 30% to the pool, 6 check-ins.
       expect(chain.calls, ['createRound Lumpini Striders LS 1000 3000 6']);
+      // The creator is not made a member: joining is the same step as for
+      // everyone else.
+      expect(state.isMember, isFalse);
 
       // Registered with the server as listed, signed by the creator.
       expect(server.bodies['/rounds'], {
@@ -707,11 +2112,10 @@ void main() {
       expect(state.rounds.map((r) => r.id), contains(createdLauncher));
       expect(state.selected, createdLauncher);
 
-      // The invite sheet opens over the form. This build has no web
-      // address, so it hands out the round's address.
+      // The invite sheet opens by itself. This build has no web address, so
+      // it hands out the round's address.
       expect(find.byType(InviteSheet), findsOneWidget);
       expect(find.text('INVITE'), findsOneWidget);
-      expect(find.text('Lumpini Striders'), findsOneWidget);
       expect(find.byKey(const Key('invite-link')), findsOneWidget);
       // The creator can change the listing from the sheet.
       expect(find.byKey(const Key('invite-unlisted')), findsOneWidget);
@@ -719,14 +2123,50 @@ void main() {
       await tester.tapAt(const Offset(195, 20)); // the barrier closes it
       await settle(tester, 12);
       expect(find.byType(InviteSheet), findsNothing);
-      expect(find.text(createdLauncher), findsOneWidget);
-      expect(find.text('It is on your Home now, selected.'), findsOneWidget);
+
+      // The same screen, now done: the name is the headline, not an address.
+      expect(find.byType(NewRoundScreen), findsOneWidget);
+      expect(find.text('NEW ROUND'), findsNothing);
+      expect(find.text('ROUND STARTED'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('round-started-name'))).data,
+        'Lumpini Striders',
+      );
+      expect(
+        find.text('It\'s on your Home. Invite people to fill the bar.'),
+        findsOneWidget,
+      );
+      expect(find.text(createdLauncher), findsNothing);
+      expect(find.textContaining('0x5000'), findsNothing);
       expect(
         find.text('Listed: everyone sees it in the list on Home.'),
         findsOneWidget,
       );
-      expect(button('Invite'), findsOneWidget);
-      expect(button('Copy round address'), findsOneWidget);
+      expect(find.byType(FloatingTabBar), findsNothing);
+      expect(find.byKey(const Key('round-name')), findsNothing);
+      final link = tester.widget<LinkRow>(find.byType(LinkRow));
+      expect(link.label, 'View on BscScan testnet');
+      expect(link.url, 'https://testnet.bscscan.com/address/$createdLauncher');
+      expect(button('Save again'), findsNothing);
+
+      // "Invite people" opens the invite sheet for that round again.
+      await press(tester, 'Invite people');
+      await settle(tester, 12);
+      expect(find.byType(InviteSheet), findsOneWidget);
+      expect(
+        tester.widget<InviteSheet>(find.byType(InviteSheet)).round.id,
+        createdLauncher,
+      );
+      await tester.tapAt(const Offset(195, 20));
+      await settle(tester, 12);
+
+      // "Go to round": Home, with the new round already selected.
+      await press(tester, 'Go to round');
+      await settle(tester, 12);
+      expect(find.byType(NewRoundScreen), findsNothing);
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(state.selected, createdLauncher);
+      expect(button('Join Lumpini Striders · 1,000 USD'), findsOneWidget);
     });
 
     testWidgets('the "Unlisted" switch says exactly what it means', (
@@ -737,36 +2177,33 @@ void main() {
         ..more.add(roundJson(at: createdLauncher, name: 'Night Owls'));
       server.unlisted.add(createdLauncher);
       final state = await makeState(chain: chain, server: server);
-      await pumpBody(
-        tester,
-        SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: StartRoundForm(state: state, missing: const []),
-        ),
-      );
+      await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
 
-      const note =
-          'Not shown in the public list. Anyone with the link can still '
-          'join, and the chain is public.';
-      expect(unlistedNote, note);
+      expect(unlistedNote, unlistedNoteText);
+      await tester.ensureVisible(find.text('More options'));
+      await tester.pump();
+      await tester.tap(find.text('More options'));
+      await settle(tester);
       final toggle = find.byKey(const Key('round-unlisted'));
       expect(
         find.descendant(of: toggle, matching: find.text('Unlisted')),
         findsOneWidget,
       );
       expect(
-        find.descendant(of: toggle, matching: find.text(note)),
+        find.descendant(of: toggle, matching: find.text(unlistedNoteText)),
         findsOneWidget,
       );
       expect(tester.widget<CapsuleToggle>(toggle).value, isFalse);
       await tester.ensureVisible(toggle);
+      await tester.pump();
       await tester.tap(toggle);
       await settle(tester);
       expect(tester.widget<CapsuleToggle>(toggle).value, isTrue);
+      expect(find.text('Token pool 30% · Unlisted'), findsOneWidget);
 
       await tester.enterText(find.byKey(const Key('round-name')), 'Night Owls');
       await settle(tester);
-      await press(tester, 'Start the round');
+      await press(tester, 'Start round');
       await settle(tester, 12);
 
       // The registration call: the pinned text, signed by the creator.
@@ -789,7 +2226,8 @@ void main() {
 
       await tester.tapAt(const Offset(195, 20));
       await settle(tester, 12);
-      expect(find.text('Unlisted. $note'), findsOneWidget);
+      expect(find.text('ROUND STARTED'), findsOneWidget);
+      expect(find.text('Unlisted. $unlistedNoteText'), findsOneWidget);
     });
 
     testWidgets('a listing the server did not save says so, with a way on', (
@@ -798,19 +2236,18 @@ void main() {
       // The server has not found the new round on chain yet.
       final server = FakeServer();
       final state = await makeState(server: server);
-      await pumpBody(
-        tester,
-        SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: StartRoundForm(state: state, missing: const []),
-        ),
-      );
+      await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
+      await tester.ensureVisible(find.text('More options'));
+      await tester.pump();
+      await tester.tap(find.text('More options'));
+      await settle(tester);
       await tester.ensureVisible(find.byKey(const Key('round-unlisted')));
+      await tester.pump();
       await tester.tap(find.byKey(const Key('round-unlisted')));
       await settle(tester);
       await tester.enterText(find.byKey(const Key('round-name')), 'Night Owls');
       await settle(tester);
-      await press(tester, 'Start the round');
+      await press(tester, 'Start round');
       await settle(tester, 12);
       await tester.tapAt(const Offset(195, 20));
       await settle(tester, 12);
@@ -819,17 +2256,33 @@ void main() {
       expect(state.selected, createdLauncher);
       expect(state.round!.name, 'Night Owls');
       expect(state.knownRound(createdLauncher)!.registered, isFalse);
+      // The done state names the round, and says plainly what is not saved.
+      expect(find.text('ROUND STARTED'), findsOneWidget);
       expect(
-        find.textContaining('has not found this round on chain yet'),
-        findsOneWidget,
+        tester.widget<Text>(find.byKey(const Key('round-started-name'))).data,
+        'Night Owls',
       );
+      final listing = find.byKey(const Key('round-listing'));
       expect(
-        find.text(
-          'Until it is saved as unlisted, the round can show in the public '
-          'list.',
+        find.descendant(
+          of: listing,
+          matching: find.textContaining(
+            'has not found this round on chain yet',
+          ),
         ),
         findsOneWidget,
       );
+      expect(
+        find.descendant(
+          of: listing,
+          matching: find.text(
+            'Until it is saved as unlisted, the round can show in the public '
+            'list.',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Unlisted. Not shown'), findsNothing);
 
       // The server finds it; "Save again" goes through.
       server.more.add(roundJson(at: createdLauncher, name: 'Night Owls'));
@@ -838,52 +2291,7 @@ void main() {
       expect(state.knownRound(createdLauncher)!.registered, isTrue);
       expect(server.unlisted, contains(createdLauncher));
       expect(find.textContaining('Unlisted. Not shown'), findsOneWidget);
-    });
-
-    testWidgets('"Open a round" takes a pasted link or address', (
-      tester,
-    ) async {
-      final server = FakeServer()
-        ..more.add(roundJson(at: launcherB, name: 'Night Owls'));
-      server.unlisted.add(launcherB);
-      final state = await makeState(server: server);
-      await pumpBody(
-        tester,
-        Padding(
-          padding: const EdgeInsets.all(20),
-          child: OpenRoundForm(state: state),
-        ),
-      );
-      expect(enabled(tester, 'Open round'), isFalse);
-
-      await tester.enterText(find.byKey(const Key('open-round')), 'hello');
-      await settle(tester);
-      await tester.tap(button('Open round'));
-      await settle(tester);
-      expect(
-        find.text('That is not a round link or a round address.'),
-        findsOneWidget,
-      );
-
-      // An address our factory never made.
-      await tester.enterText(find.byKey(const Key('open-round')), launcherD);
-      await settle(tester);
-      await tester.tap(button('Open round'));
-      await settle(tester, 12);
-      expect(find.text('That link does not lead to a round.'), findsOneWidget);
-      expect(state.selected, launcher);
-
-      // A link to an unlisted round opens it.
-      await tester.enterText(
-        find.byKey(const Key('open-round')),
-        'https://run.example/#/r/${launcherB.toUpperCase().replaceFirst('0X', '0x')}',
-      );
-      await settle(tester);
-      await tester.tap(button('Open round'));
-      await settle(tester, 12);
-      expect(state.selected, launcherB);
-      expect(state.round!.name, 'Night Owls');
-      expect(bannerNote.value!.text, 'Round opened.');
+      expect(button('Save again'), findsNothing);
     });
 
     testWidgets('a build without addresses says which values are missing', (
@@ -892,15 +2300,18 @@ void main() {
       final state = await makeState();
       await pumpBody(
         tester,
-        StartRoundForm(
+        NewRoundScreen(
           state: state,
           missing: const ['CHECKIN_LAUNCHER_FACTORY', 'ATTESTER_ADDRESS'],
         ),
       );
+      expect(find.text('NEW ROUND'), findsOneWidget);
+      expect(find.byTooltip('Back'), findsOneWidget);
       expect(find.text('This build cannot start a round yet.'), findsOneWidget);
       expect(find.text('CHECKIN_LAUNCHER_FACTORY'), findsOneWidget);
       expect(find.text('ATTESTER_ADDRESS'), findsOneWidget);
-      expect(button('Start the round'), findsNothing);
+      expect(button('Start round'), findsNothing);
+      expect(find.byKey(const Key('round-name')), findsNothing);
     });
   });
 }

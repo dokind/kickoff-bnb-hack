@@ -557,7 +557,7 @@ void main() {
         tester.getSize(find.byKey(const Key('home-action'))).height,
         greaterThan(260),
       );
-      expect(action('Sponsor the launch pool'), findsOneWidget);
+      expect(action('Sponsor the token pool'), findsOneWidget);
       await toTheEnd(tester);
       final scrim = tester.getRect(find.byKey(const Key('home-action')));
       final last = tester.getRect(find.byKey(const Key('how-it-works')));

@@ -91,6 +91,12 @@ Deployed 25 November 2026 from `0xc1bD6aC9311b9345ae8023201875518429c8BF58`; the
 | `CheckInLauncherFactory` (our Launcher Factory) | [`0x2A872200B83dD025977d785cDE05356d23eA4153`](https://testnet.bscscan.com/address/0x2A872200B83dD025977d785cDE05356d23eA4153) | [`0x827f9b4e404217a35e75fbef0f9ea0012f1c3e0d490ac87a88e31c44079c094c`](https://testnet.bscscan.com/tx/0x827f9b4e404217a35e75fbef0f9ea0012f1c3e0d490ac87a88e31c44079c094c) |
 | `StreakVaultFactory` | [`0x0652AAD1d659344f6EdB9572723479aaece144Be`](https://testnet.bscscan.com/address/0x0652AAD1d659344f6EdB9572723479aaece144Be) | [`0x19a6d3aa23f2d6e5458965070462f1411a62256d67403f8127232b4fa1deb2a6`](https://testnet.bscscan.com/tx/0x19a6d3aa23f2d6e5458965070462f1411a62256d67403f8127232b4fa1deb2a6) |
 
+The Launcher Factory is enabled on the Flap Portal at the standard 1x multiplier:
+`launcherFactoryMultiplier(0x2A87…4153)` reads `true, 10000`. It was enabled on 26 November 2026
+through Flap's testnet helper `0x77779969a11eff7582f3bCf48135A846A3457777` in
+[`0x2a7d71063496b439a12248f90b133ce5230d7c9581a25b6af84ede2ec3d9ad45`](https://testnet.bscscan.com/tx/0x2a7d71063496b439a12248f90b133ce5230d7c9581a25b6af84ede2ec3d9ad45).
+Anyone can call that helper for any factory, so read the value back before a demo.
+
 | Fixed address | |
 |---|---|
 | Attester (our server's key; also the faucet wallet) | `0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7` |
