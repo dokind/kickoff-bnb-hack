@@ -7,8 +7,11 @@
 // It deploys the two factories on the fork, opens a round through Flap's Portal, and then walks
 // three members through join, check-in (POST /checkin, then the member's own checkIn transaction
 // with the attester's signature), launch by a wallet with no role, and claim, reading the API
-// after each step. Every key here is one of anvil's well-known test keys; nothing touches the real
-// testnet and nothing is written outside this process.
+// after each step. On the way it checks that the round is found in the factory's creation event
+// (GET /rounds), that its creator and nobody else can take it off the public list (POST /rounds),
+// and that the per-round routes answer as the single-round ones do. Every key here is one of
+// anvil's well-known test keys; nothing touches the real testnet and nothing is written outside
+// this process.
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -33,7 +36,8 @@ import { bscTestnet } from "viem/chains";
 import { createApp } from "../src/app.js";
 import { createAttester } from "../src/attest.js";
 import { createChain } from "../src/chain.js";
-import { checkInMessage } from "../src/product.js";
+import { checkInMessage, roundMessage } from "../src/product.js";
+import { createRounds } from "../src/rounds.js";
 import { LocalStore } from "../src/store.js";
 
 const RPC = process.env.FORK_RPC_URL || "http://127.0.0.1:8546";
@@ -174,13 +178,18 @@ async function main() {
   // 3. This server, pointed at the fork and at that round. Its clock is the fork's.
   let chainNow = Number(block.timestamp);
   const tick = async () => (chainNow = Number((await client.getBlock()).timestamp));
+  // Rounds are discovered from the factory deployed above, starting at its own block.
+  const store = new LocalStore();
+  const chain = createChain(RPC, undefined, d2.contractAddress!);
   const app = createApp({
-    store: new LocalStore(),
-    chain: createChain(RPC),
+    store,
+    chain,
     attester,
     now: () => chainNow,
     defaultRound: { launcher: round },
     allowSelfReported: true,
+    rounds: createRounds({ store, factory: chain.factory, fromBlock: Number(d2.blockNumber) }),
+    listCacheMs: 0,
   });
   const get = async (path: string) => {
     await tick();
@@ -231,6 +240,28 @@ async function main() {
   const dayIndex: number = r.body.dayIndex;
   const today: string = r.body.today;
 
+  // 3b. The round is found in the factory's creation event, with the wallet that called the Portal
+  // as its creator. Only that wallet can take it off the public list or put it back.
+  console.log("GET /rounds, GET /rounds/:launcher, POST /rounds");
+  const id = round.toLowerCase();
+  const listedRounds = async () => ((await get("/rounds")).body.rounds as { launcher: string; state: string; featured: boolean }[]).map((x) => [x.launcher, x.state, x.featured]);
+  assert.deepEqual(await listedRounds(), [[id, "open", true]]);
+  assert.deepEqual((await store.getDiscovery())?.rounds.map((x) => [x.launcher, x.creator]), [[id, deployer.address.toLowerCase()]]);
+  assert.deepEqual((await get(`/rounds/${round}`)).body, { ...(await get("/round")).body, unlisted: false });
+  const choice = async (who: ReturnType<typeof account>, unlisted: boolean) =>
+    post("/rounds", { launcher: round, unlisted, signature: await who.signMessage({ message: roundMessage(id, unlisted) }) });
+  const refused = await choice(alice, true);
+  assert.deepEqual([refused.status, refused.body.error], [401, "bad_signature"]);
+  assert.deepEqual((await choice(deployer, true)).body, { launcher: id, unlisted: true });
+  assert.deepEqual(await listedRounds(), []);
+  // Unlisted is only about the list: the round still answers by address.
+  assert.equal((await get(`/rounds/${round}`)).body.unlisted, true);
+  assert.deepEqual((await choice(deployer, false)).body, { launcher: id, unlisted: false });
+  assert.deepEqual(await listedRounds(), [[id, "open", true]]);
+  // A contract our factory did not create is not a round here, even though it exists.
+  const notOurs = await get(`/rounds/${PORTAL}`);
+  assert.deepEqual([notOurs.status, notOurs.body.error], [404, "no_round"]);
+
   // 4. Three members join; a wallet with no role sponsors 600 so the pool reaches Flap's floor.
   console.log("join and sponsor");
   const members = [alice, bob, carol];
@@ -265,7 +296,8 @@ async function main() {
   console.log("check in");
   for (const [i, who] of members.entries()) {
     const steps = 4000 + i;
-    const answer = await post("/checkin", {
+    // The last member reports through the per-round route; the signed text is the same.
+    const answer = await post(i === 2 ? `/rounds/${round}/checkin` : "/checkin", {
       address: who.address,
       steps,
       source: i === 0 ? "self" : "healthkit",
@@ -289,6 +321,7 @@ async function main() {
     );
     me = await get(`/me/${who.address}`);
     assert.deepEqual([me.body.daysOf, me.body.checkedInToday, me.body.days], [1, true, [today]]);
+    assert.deepEqual((await get(`/rounds/${round}/me/${who.address}`)).body, me.body);
   }
   // Once the day is on chain there is nothing left to sign.
   const again = await post("/checkin", {
@@ -309,6 +342,7 @@ async function main() {
       .map((m) => ({ address: m.address.toLowerCase(), daysOf: 1, streak: 1, checkedInToday: true }))
       .sort((a, b) => (a.address < b.address ? -1 : 1)),
   );
+  assert.deepEqual((await get(`/rounds/${round}/members`)).body, list.body);
 
   // 6. Launch, by the wallet that is neither a member nor the attester nor the creator.
   console.log("launch");
@@ -319,6 +353,8 @@ async function main() {
   assert.match(r.body.vault, /^0x[0-9a-f]{40}$/);
   assert.deepEqual([r.body.prizeNow, r.body.poolQuoteNow, r.body.canLaunch, r.body.flapUrl], ["2100", "1500", false, null]);
   console.log(`  token ${r.body.token}, vault ${r.body.vault}`);
+  assert.deepEqual(await listedRounds(), [[id, "launched", true]]);
+  assert.deepEqual((await get(`/rounds/${round}`)).body, { ...r.body, unlisted: false });
 
   const closed = await post("/checkin", {
     address: alice.address,

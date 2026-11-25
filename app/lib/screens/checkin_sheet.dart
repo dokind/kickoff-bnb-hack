@@ -2,15 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
 import '../widgets/gauges.dart';
 
-/// Opens the check-in sheet over the current screen.
-Future<void> showCheckInSheet(BuildContext context, AppState state) =>
-    showAppSheet<void>(context, builder: (_) => CheckInSheet(state: state));
+/// Opens the check-in sheet for [round] over the current screen.
+Future<void> showCheckInSheet(
+  BuildContext context,
+  AppState state,
+  Round round,
+) => showAppSheet<void>(
+  context,
+  builder: (_) => CheckInSheet(state: state, round: round),
+);
 
 /// Today's check-in.
 ///
@@ -20,9 +27,16 @@ Future<void> showCheckInSheet(BuildContext context, AppState state) =>
 /// only". Either way the steps go to the server, which answers with the
 /// attester's signature; the app then sends `checkIn(dayIndex, signature)`
 /// itself and shows the transaction.
+///
+/// The sheet is about [round] from the moment it opens until it closes: its
+/// name is over the title, and the check-in is for that round whatever card
+/// is in view on Home behind it.
 class CheckInSheet extends StatefulWidget {
-  const CheckInSheet({super.key, required this.state});
+  const CheckInSheet({super.key, required this.state, required this.round});
   final AppState state;
+
+  /// The round named on the button that opened the sheet.
+  final Round round;
 
   @override
   State<CheckInSheet> createState() => _CheckInSheetState();
@@ -43,6 +57,11 @@ class _CheckInSheetState extends State<CheckInSheet> {
 
   AppState get _state => widget.state;
   bool get _phone => _state.health.available;
+
+  /// The sheet's round as the app reads it now; as it was when the sheet
+  /// opened if it has left the slider since.
+  Round get _round => _state.roundOf(widget.round.id) ?? widget.round;
+  bool get _pending => _state.hasPendingCheckInFor(widget.round.id);
 
   @override
   void initState() {
@@ -79,6 +98,7 @@ class _CheckInSheetState extends State<CheckInSheet> {
     try {
       final tx = await _state.checkIn(
         selfReported: _phone ? null : int.tryParse(_typed.text.trim()) ?? 0,
+        launcher: widget.round.launcher,
       );
       if (mounted) setState(() => _tx = tx);
     } catch (e) {
@@ -104,7 +124,7 @@ class _CheckInSheetState extends State<CheckInSheet> {
   Widget _doneView(BuildContext context) {
     final t = context.type;
     final c = context.colors;
-    final streak = _state.streak;
+    final streak = _state.streakIn(widget.round.id);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -112,10 +132,13 @@ class _CheckInSheetState extends State<CheckInSheet> {
         const SizedBox(height: Space.s4),
         Icon(Icons.verified_rounded, size: 44, color: c.volt),
         const SizedBox(height: Space.s3),
+        RoundLabel(_round.name),
+        const SizedBox(height: Space.s1),
         Text('CHECKED IN.', style: t.display(60)),
         const SizedBox(height: Space.s3),
         Text(
-          'Today is on chain. You have ${days(_state.daysOf)} in this round'
+          'Today is on chain. You have '
+          '${days(_state.daysIn(widget.round.id))} in this round'
           '${streak > 1 ? ' and a streak of $streak' : ''}. Come back '
           'tomorrow.',
           style: t.body(15).copyWith(color: c.text2),
@@ -139,14 +162,16 @@ class _CheckInSheetState extends State<CheckInSheet> {
   Widget _form(BuildContext context) {
     final t = context.type;
     final c = context.colors;
-    final min = _state.round?.minSteps ?? 1000;
-    final pending = _state.hasPendingCheckIn;
+    final min = _round.minSteps;
+    final pending = _pending;
     final enough = pending || !_phone || (_steps ?? 0) >= min;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        RoundLabel(_round.name),
+        const SizedBox(height: Space.s1),
         Semantics(
           header: true,
           child: Text('Check in today', style: t.title(30)),
@@ -219,7 +244,7 @@ class _CheckInSheetState extends State<CheckInSheet> {
           busy: _busy,
           busyLabel: _state.funding
               ? 'Preparing your wallet…'
-              : _state.hasPendingCheckIn
+              : _pending
               ? 'Recording on chain…'
               : 'Checking your steps…',
           onPressed: enough && !_reading ? _checkIn : null,

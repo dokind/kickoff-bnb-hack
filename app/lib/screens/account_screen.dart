@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
@@ -14,10 +17,12 @@ import '../widgets/dot_matrix.dart';
 import '../widgets/gauges.dart';
 import '../widgets/identicon.dart';
 import '../widgets/main_tabs.dart';
+import 'invite_sheet.dart';
 
 /// Account: the only place the wallet shows. Address, balances, "Back up
-/// key", "Import a key", and a small "Start a new round" form for whoever
-/// creates rounds. Nobody has to come here to use the app.
+/// key", "Import a key", "Open a round" for a link or an address someone
+/// sent, and a small "Start a new round" form. Nobody has to come here to
+/// use the app.
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key, required this.state, this.showBar = true});
   final AppState state;
@@ -180,6 +185,13 @@ class _AccountScreenState extends State<AccountScreen> {
                         builder: (_) => ImportKeySheet(state: _state),
                       ),
                     ),
+                    const SizedBox(height: 22),
+                    const SectionHeader(
+                      'Open a round',
+                      trailing: 'by link or address',
+                    ),
+                    const SizedBox(height: Space.s3),
+                    OpenRoundForm(state: _state),
                     const SizedBox(height: 22),
                     const SectionHeader(
                       'Start a new round',
@@ -427,10 +439,100 @@ class _ImportKeySheetState extends State<ImportKeySheet> {
   }
 }
 
-/// "Start a new round": name, deposit, launch pool share, check-in goal and
-/// deadline. Mines the launch salt, calls `Portal.newLauncher` with the
-/// CheckInLauncherFactory and shows the new round's address to copy. Making
-/// it the current round is a step for whoever runs the server.
+/// "Open a round": paste a round's link (or its address) to put that round
+/// on this device's Home, listed or not. A link opened in a browser does
+/// this by itself; this is the way in for a phone build.
+class OpenRoundForm extends StatefulWidget {
+  const OpenRoundForm({super.key, required this.state});
+  final AppState state;
+
+  @override
+  State<OpenRoundForm> createState() => _OpenRoundFormState();
+}
+
+class _OpenRoundFormState extends State<OpenRoundForm> {
+  final _link = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _link.dispose();
+    super.dispose();
+  }
+
+  Future<void> _open() async {
+    final state = widget.state;
+    final launcher = AppConfig.launcherFromLink(_link.text);
+    if (launcher == null) {
+      setState(() => _error = 'That is not a round link or a round address.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await state.openLink(launcher);
+      if (!mounted) return;
+      if (state.selected == launcher) {
+        _link.clear();
+        showMessage(context, 'Round opened.', kind: BannerKind.success);
+        GoRouter.maybeOf(context)?.go('/');
+      } else {
+        // The state says why in one sentence; it is shown here instead.
+        final said = state.notice;
+        state.notice = null;
+        setState(
+          () => _error =
+              said ??
+              state.roundError ??
+              'That round could not '
+                  'be opened. Try again.',
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      GlassField(
+        fieldKey: const Key('open-round'),
+        controller: _link,
+        placeholder: 'Paste a round link',
+        label: 'Round link or address',
+        mono: true,
+        onChanged: (_) => setState(() => _error = null),
+      ),
+      const SizedBox(height: Space.s3),
+      if (_error != null) ...[
+        ErrorLine(_error!),
+        const SizedBox(height: Space.s3),
+      ],
+      PillButton(
+        kind: PillKind.glass,
+        height: Sizes.buttonSmall,
+        icon: Icons.link_rounded,
+        label: 'Open round',
+        busy: _busy,
+        onPressed: _link.text.trim().isEmpty ? null : _open,
+      ),
+    ],
+  );
+}
+
+/// "Start a new round": name, deposit, launch pool share, check-in goal,
+/// deadline, and whether it is unlisted. Mines the launch salt, calls
+/// `Portal.newLauncher` with the CheckInLauncherFactory, tells the server
+/// whether the round is shown in the public list (signed by this wallet),
+/// and opens the invite sheet with the new round's link. The round is on
+/// this device's Home at once.
 class StartRoundForm extends StatefulWidget {
   const StartRoundForm({super.key, required this.state, this.missing});
   final AppState state;
@@ -449,6 +551,10 @@ class _StartRoundFormState extends State<StartRoundForm> {
   int _bps = AppConfig.defaultLiquidityBps;
   int _goal = 6;
   int _daysOpen = 7;
+
+  /// Not shown in the public list. Still open to anyone with the link, and
+  /// on the public chain.
+  bool _unlisted = false;
   bool _busy = false;
   String? _error;
   String? _launcher;
@@ -459,6 +565,25 @@ class _StartRoundFormState extends State<StartRoundForm> {
   void dispose() {
     _name.dispose();
     super.dispose();
+  }
+
+  Round? _roundAt(String launcher) {
+    for (final r in _state.rounds) {
+      if (r.id == launcher.toLowerCase()) return r;
+    }
+    return null;
+  }
+
+  /// Asks the server again to save whether the round is listed.
+  Future<void> _saveListing(String launcher) async {
+    setState(() => _busy = true);
+    try {
+      await _state.registerRound(launcher);
+    } catch (_) {
+      // The card shows the sentence the state kept.
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// How many members fill Flap's pool floor with no sponsor.
@@ -484,8 +609,13 @@ class _StartRoundFormState extends State<StartRoundForm> {
         liquidityBps: _bps,
         checkInGoal: _goal,
         deadline: _state.now.add(Duration(days: _daysOpen)),
+        unlisted: _unlisted,
       );
-      if (mounted) setState(() => _launcher = launcher);
+      if (!mounted) return;
+      setState(() => _launcher = launcher);
+      // Straight to the link to hand out.
+      final round = _roundAt(launcher);
+      if (round != null) unawaited(showInviteSheet(context, _state, round));
     } catch (e) {
       if (mounted) setState(() => _error = friendlyError(e));
     } finally {
@@ -524,36 +654,89 @@ class _StartRoundFormState extends State<StartRoundForm> {
 
     final launcher = _launcher;
     if (launcher != null) {
-      return GlassCard(
-        tint: c.volt.withValues(alpha: 0.3),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Overline('Round started'),
-            const SizedBox(height: Space.s2),
-            SelectableText(launcher, style: t.mono.copyWith(fontSize: 12.5)),
-            const SizedBox(height: Space.s3),
-            PillButton(
-              height: Sizes.buttonSmall,
-              icon: Icons.copy_rounded,
-              label: 'Copy round address',
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: launcher));
-                showMessage(context, 'Round address copied.');
-              },
+      return ListenableBuilder(
+        listenable: _state,
+        builder: (context, _) {
+          final known = _state.knownRound(launcher);
+          final round = _roundAt(launcher);
+          final saved = known?.registered ?? false;
+          final unlisted = known?.unlisted ?? _unlisted;
+          return GlassCard(
+            tint: c.volt.withValues(alpha: 0.3),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Overline('Round started'),
+                const SizedBox(height: Space.s2),
+                SelectableText(
+                  launcher,
+                  style: t.mono.copyWith(fontSize: 12.5),
+                ),
+                const SizedBox(height: Space.s3),
+                Text(
+                  'It is on your Home now, selected.',
+                  style: t.body(14, FontWeight.w600),
+                ),
+                const SizedBox(height: Space.s1),
+                if (saved)
+                  Text(
+                    unlisted
+                        ? 'Unlisted. $unlistedNote'
+                        : 'Listed: everyone sees it in the list on Home.',
+                    style: t.body(13).copyWith(color: c.text2),
+                  )
+                else ...[
+                  ErrorLine(
+                    known?.registerError ??
+                        'The server has not saved whether this round is '
+                            'listed yet.',
+                  ),
+                  if (unlisted) ...[
+                    const SizedBox(height: Space.s1),
+                    Text(
+                      'Until it is saved as unlisted, the round can show in '
+                      'the public list.',
+                      style: t.body(13).copyWith(color: c.text2),
+                    ),
+                  ],
+                  const SizedBox(height: Space.s3),
+                  PillButton(
+                    kind: PillKind.glass,
+                    height: Sizes.buttonSmall,
+                    icon: Icons.refresh_rounded,
+                    label: 'Save again',
+                    busy: _busy,
+                    onPressed: () => _saveListing(launcher),
+                  ),
+                ],
+                const SizedBox(height: Space.s3),
+                if (round != null) ...[
+                  PillButton(
+                    height: Sizes.buttonSmall,
+                    icon: Icons.ios_share_rounded,
+                    label: 'Invite',
+                    onPressed: () => showInviteSheet(context, _state, round),
+                  ),
+                  const SizedBox(height: Space.s2),
+                ],
+                PillButton(
+                  kind: PillKind.glass,
+                  height: Sizes.buttonSmall,
+                  icon: Icons.copy_rounded,
+                  label: 'Copy round address',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: launcher));
+                    showMessage(context, 'Round address copied.');
+                  },
+                ),
+                LinkRow(
+                  label: 'View on BscScan testnet',
+                  url: '${AppConfig.explorerAddress}$launcher',
+                ),
+              ],
             ),
-            const SizedBox(height: Space.s3),
-            Text(
-              'Give this address to whoever runs the server. The app shows '
-              'the round once the server is set to it.',
-              style: t.body(13).copyWith(color: c.text2),
-            ),
-            LinkRow(
-              label: 'View on BscScan testnet',
-              url: '${AppConfig.explorerAddress}$launcher',
-            ),
-          ],
-        ),
+          );
+        },
       );
     }
 
@@ -614,6 +797,17 @@ class _StartRoundFormState extends State<StartRoundForm> {
             onChanged: (v) => setState(() => _daysOpen = v),
           ),
         ),
+        GlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          child: CapsuleToggle(
+            key: const Key('round-unlisted'),
+            title: 'Unlisted',
+            detail: unlistedNote,
+            value: _unlisted,
+            onChanged: (v) => setState(() => _unlisted = v),
+          ),
+        ),
+        const SizedBox(height: 22),
         CustomPaint(
           painter: _DashedBorder(c.hairline),
           child: Padding(

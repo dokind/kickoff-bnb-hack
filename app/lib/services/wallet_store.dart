@@ -5,8 +5,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:web3dart/web3dart.dart';
 
 /// Keeps the device wallet key in the platform keystore (Keychain / Keystore;
-/// the site's storage in a browser), the onboarding flag, and a check-in the
-/// server has signed but the chain has not recorded yet.
+/// the site's storage in a browser), the onboarding flag, a check-in the
+/// server has signed but the chain has not recorded yet, and the rounds this
+/// device knows beyond the public list (opened by link or started here) with
+/// the one last selected.
 ///
 /// The storage names keep the prefix of the app's first build, so a wallet
 /// made by an earlier build is still found.
@@ -14,6 +16,7 @@ class WalletStore {
   static const _keyName = 'pacepact.wallet.key';
   static const _onboardedName = 'pacepact.onboarded';
   static const _pendingName = 'showup.checkin.pending';
+  static const _roundsName = 'showup.rounds';
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
@@ -56,6 +59,22 @@ class WalletStore {
   Future<void> savePending(Map<String, dynamic>? pending) => pending == null
       ? _storage.delete(key: _pendingName)
       : _storage.write(key: _pendingName, value: jsonEncode(pending));
+
+  /// The rounds this device knows and the selected one, as JSON
+  /// (`{selected, known: [...]}`), or null.
+  Future<Map<String, dynamic>?> loadRounds() async {
+    final text = await _storage.read(key: _roundsName);
+    if (text == null) return null;
+    try {
+      final decoded = jsonDecode(text);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveRounds(Map<String, dynamic> rounds) =>
+      _storage.write(key: _roundsName, value: jsonEncode(rounds));
 }
 
 /// The private key as exactly 64 hex characters.

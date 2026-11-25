@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -278,29 +279,61 @@ class SheetFrame extends StatelessWidget {
 
 // Small pieces ----------------------------------------------------------------
 
-/// The soft dark fade behind an action pinned to the bottom of a screen, so
-/// content scrolls out under it.
+/// The scrim behind an action pinned to the bottom of a screen. It rises
+/// from clear to the background colour over its first [rise] pixels and is
+/// opaque below that, so nothing scrolling under the action shows through
+/// its text. The action leaves [rise] of padding above itself.
 class BottomFade extends StatelessWidget {
-  const BottomFade({super.key, required this.child});
+  const BottomFade({super.key, required this.child, this.rise = defaultRise});
   final Widget child;
+
+  /// Height of the clear-to-opaque part at the top.
+  final double rise;
+
+  static const double defaultRise = 48;
+
+  /// How opaque the scrim is [dy] pixels below its top edge: 0 at the edge,
+  /// 1 from [rise] down.
+  static double opacityAt(double dy, {double rise = defaultRise}) {
+    if (dy <= 0) return 0;
+    if (dy >= rise) return 1;
+    final t = dy / rise;
+    // The gradient's middle stop: 72% at 55% of the way.
+    return t < 0.55 ? 0.72 * t / 0.55 : 0.72 + 0.28 * (t - 0.55) / 0.45;
+  }
 
   @override
   Widget build(BuildContext context) {
     final ink = context.colors.ink;
-    Widget fade = DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [ink.withValues(alpha: 0), ink.withValues(alpha: 0.94), ink],
-          stops: const [0, 0.24, 1],
-        ),
-      ),
+    Widget scrim = LayoutBuilder(
+      builder: (context, box) {
+        final height = box.maxHeight;
+        final end = height <= 0 ? 1.0 : (rise / height).clamp(0.0, 1.0);
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                ink.withValues(alpha: 0),
+                ink.withValues(alpha: 0.72),
+                ink,
+                ink,
+              ],
+              stops: [0, end * 0.55, end, 1],
+            ),
+          ),
+          child: const SizedBox.expand(),
+        );
+      },
     );
-    // In the centred column of a wide window the fade would end in two hard
-    // vertical edges, so it thins out over the side margins.
-    if (MediaQuery.sizeOf(context).width > Sizes.column) {
-      fade = ShaderMask(
+    // In the centred column of a wide window the scrim would end in two
+    // hard vertical edges, so it thins out inside the side margins. It is
+    // whole again before the content starts.
+    final width = MediaQuery.sizeOf(context).width;
+    if (width > Sizes.column) {
+      const soft = Space.gutter / Sizes.column;
+      scrim = ShaderMask(
         blendMode: BlendMode.dstIn,
         shaderCallback: (rect) => const LinearGradient(
           colors: [
@@ -309,17 +342,51 @@ class BottomFade extends StatelessWidget {
             Colors.black,
             Colors.transparent,
           ],
-          stops: [0, 0.05, 0.95, 1],
+          stops: [0, soft, 1 - soft, 1],
         ).createShader(rect),
-        child: fade,
+        child: scrim,
       );
     }
     return Stack(
       children: [
-        Positioned.fill(child: fade),
+        Positioned.fill(child: IgnorePointer(child: scrim)),
         child,
       ],
     );
+  }
+}
+
+/// Tells [onSize] how large its child was laid out, after the frame. Home
+/// uses it to leave room under its scrolling content for the floating
+/// action, whatever that holds.
+class SizeReporter extends SingleChildRenderObjectWidget {
+  const SizeReporter({super.key, required this.onSize, super.child});
+  final ValueChanged<Size> onSize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderSizeReporter(onSize);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant RenderObject renderObject,
+  ) => (renderObject as _RenderSizeReporter).onSize = onSize;
+}
+
+class _RenderSizeReporter extends RenderProxyBox {
+  _RenderSizeReporter(this.onSize);
+  ValueChanged<Size> onSize;
+  Size? _told;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size == _told) return;
+    _told = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (attached) onSize(size);
+    });
   }
 }
 

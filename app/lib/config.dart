@@ -63,7 +63,7 @@ class AppConfig {
   }
 
   /// Where the web build of this app is served, without a trailing slash:
-  /// the link "Copy invite link" hands out. Set it at build time with
+  /// the start of every round's invite link. Set it at build time with
   /// `--dart-define=WEB_BASE_URL=https://...`. When it is not set, the web
   /// build uses the address it is served from and a phone build has no link
   /// to hand out.
@@ -74,6 +74,34 @@ class AppConfig {
     if (url.isEmpty && kIsWeb) url = Uri.base.origin + Uri.base.path;
     return url.replaceFirst(RegExp(r'/+$'), '');
   }
+
+  /// A round's link: `<webBaseUrl>/#/r/<launcher>`. Opening it selects that
+  /// round, listed or not. Empty when the build has no web address.
+  static String inviteLink(String launcher) =>
+      inviteLinkFor(webBaseUrl, launcher);
+
+  /// [inviteLink] for any base, so tests can check it.
+  static String inviteLinkFor(String base, String launcher) {
+    final b = base.trim().replaceFirst(RegExp(r'/+$'), '');
+    return b.isEmpty ? '' : '$b/#/r/${launcher.toLowerCase()}';
+  }
+
+  /// The launcher address in a round's link, a route (`/r/0x...`) or a bare
+  /// address, in lower case. Null when the text holds none.
+  static String? launcherFromLink(String text) {
+    final t = text.trim();
+    final linked = RegExp(
+      r'/r/(0x[0-9a-fA-F]{40})(?![0-9a-fA-F])',
+    ).firstMatch(t);
+    if (linked != null) return linked.group(1)!.toLowerCase();
+    return RegExp(r'^0x[0-9a-fA-F]{40}$').hasMatch(t) ? t.toLowerCase() : null;
+  }
+
+  /// How often the round cards on Home move on by themselves (until the
+  /// first touch on Home, never after it), and how long they wait once a
+  /// sheet has closed or a mouse has left them before they start again.
+  static const Duration sliderInterval = Duration(seconds: 5);
+  static const Duration sliderHold = Duration(seconds: 10);
 
   /// Flap's free-mint test "USD" on BSC testnet (18 decimals). Anyone can
   /// call `mint(address,uint256)`. It stands in for a stablecoin.

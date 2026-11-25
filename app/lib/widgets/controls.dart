@@ -21,9 +21,16 @@ class PillButton extends StatefulWidget {
     this.busy = false,
     this.busyLabel,
     this.height = Sizes.button,
+    this.shrink,
   });
 
   final String label;
+
+  /// A part of [label] that gives way when the label is wider than the
+  /// button: a round's name in "Join Demo Day · 500 USD". It is cut short
+  /// with an ellipsis and the words around it (the action, the amount) stay.
+  /// Screen readers always get the whole label.
+  final String? shrink;
   final VoidCallback? onPressed;
   final PillKind kind;
   final IconData? icon;
@@ -31,12 +38,59 @@ class PillButton extends StatefulWidget {
   final String? busyLabel;
   final double height;
 
+  /// [label] as it is drawn in [width]: whole when it fits, else with
+  /// [shrink] cut to as many characters as fit, followed by an ellipsis.
+  /// [widthOf] measures a line of text.
+  static String fitLabel(
+    String label,
+    String? shrink,
+    double width,
+    double Function(String text) widthOf,
+  ) {
+    if (shrink == null || shrink.isEmpty) return label;
+    final at = label.indexOf(shrink);
+    if (at < 0 || widthOf(label) <= width) return label;
+    final head = label.substring(0, at);
+    final tail = label.substring(at + shrink.length);
+    final letters = shrink.characters;
+    if (letters.length < 2) return label;
+    String cut(int n) => '$head${letters.take(n).toString().trimRight()}…$tail';
+    // The most letters of the name that still fit: at least one.
+    var low = 1;
+    var high = letters.length - 1;
+    while (low < high) {
+      final mid = (low + high + 1) ~/ 2;
+      if (widthOf(cut(mid)) <= width) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return cut(low);
+  }
+
   @override
   State<PillButton> createState() => _PillButtonState();
 }
 
 class _PillButtonState extends State<PillButton> {
   bool _down = false;
+
+  /// How wide [text] is on one line, as the label draws it.
+  static double _widthOf(BuildContext context, String text, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: DefaultTextStyle.of(context).style.merge(style),
+      ),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return width;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +101,7 @@ class _PillButtonState extends State<PillButton> {
       PillKind.glass => c.text,
       PillKind.danger => c.danger,
     };
+    final style = context.type.body(16, FontWeight.w600).copyWith(color: ink);
     final label = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -62,12 +117,28 @@ class _PillButtonState extends State<PillButton> {
           const SizedBox(width: 8),
         ],
         Flexible(
-          child: Text(
-            widget.busy ? (widget.busyLabel ?? widget.label) : widget.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: context.type.body(16, FontWeight.w600).copyWith(color: ink),
-          ),
+          child: widget.busy || widget.shrink == null
+              ? Text(
+                  widget.busy
+                      ? (widget.busyLabel ?? widget.label)
+                      : widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                )
+              : LayoutBuilder(
+                  builder: (context, box) => Text(
+                    PillButton.fitLabel(
+                      widget.label,
+                      widget.shrink,
+                      box.maxWidth,
+                      (text) => _widthOf(context, text, style),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: style,
+                  ),
+                ),
         ),
       ],
     );
@@ -443,6 +514,35 @@ class Overline extends StatelessWidget {
   Widget build(BuildContext context) => Text(
     text.toUpperCase(),
     style: context.type.overline.copyWith(color: color),
+  );
+}
+
+/// Which round a sheet or a screen is about, above its title: "ROUND" and
+/// the round's name as it was written, on one line.
+class RoundLabel extends StatelessWidget {
+  const RoundLabel(this.name, {super.key});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Round: $name',
+    excludeSemantics: true,
+    child: Row(
+      children: [
+        const Overline('Round'),
+        const SizedBox(width: Space.s2),
+        Flexible(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: context.type
+                .body(15, FontWeight.w600)
+                .copyWith(color: context.colors.volt),
+          ),
+        ),
+      ],
+    ),
   );
 }
 

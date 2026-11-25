@@ -234,8 +234,8 @@ void main() {
       final state = await makeState(chain: chain, server: server, store: store);
       final tx = await state.checkIn(selfReported: 6214);
       expect(tx, startsWith('0xc1'));
-      expect(server.bodies['/checkin']!['steps'], 6214);
-      expect(server.bodies['/checkin']!['source'], 'self');
+      expect(server.bodies['/rounds/$launcher/checkin']!['steps'], 6214);
+      expect(server.bodies['/rounds/$launcher/checkin']!['source'], 'self');
       expect(chain.calls, ['checkIn 20782']);
       expect(state.checkedInToday, isTrue);
       expect(state.stage, HomeStage.checkedIn);
@@ -250,8 +250,11 @@ void main() {
         health: FakeHealth(available: true, steps: 8040),
       );
       await state.checkIn();
-      expect(server.bodies['/checkin']!['steps'], 8040);
-      expect(server.bodies['/checkin']!['source'], 'healthkit');
+      expect(server.bodies['/rounds/$launcher/checkin']!['steps'], 8040);
+      expect(
+        server.bodies['/rounds/$launcher/checkin']!['source'],
+        'healthkit',
+      );
     });
 
     test('too few steps never reaches the server', () async {
@@ -268,7 +271,7 @@ void main() {
           ),
         ),
       );
-      expect(server.count('POST /checkin'), 0);
+      expect(server.count('POST /rounds/$launcher/checkin'), 0);
     });
 
     test(
@@ -296,7 +299,7 @@ void main() {
         );
         expect(again.hasPendingCheckIn, isTrue);
         await again.checkIn();
-        expect(server.count('POST /checkin'), 1);
+        expect(server.count('POST /rounds/$launcher/checkin'), 1);
         expect(chain.calls, ['checkIn 20782']);
         expect(again.hasPendingCheckIn, isFalse);
         expect(store.pending, isNull);

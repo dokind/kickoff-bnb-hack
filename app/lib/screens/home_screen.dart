@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app_state.dart';
@@ -15,17 +14,27 @@ import '../widgets/dot_matrix.dart';
 import '../widgets/gauges.dart';
 import '../widgets/identicon.dart';
 import '../widgets/main_tabs.dart';
+import '../widgets/round_slider.dart';
 import 'checkin_sheet.dart';
+import 'invite_sheet.dart';
 import 'join_sheet.dart';
 import 'sponsor_sheet.dart';
 
-/// Home, the one screen. The streak is the hero numeral, with today's state
-/// and ONE primary action that changes with it:
-///   "Join for 1,000 USD" -> "Check in today" -> "Checked in" (with a hint
-///   about tomorrow) -> "Launch the token" once the bar is full (anyone) ->
-///   "Claim your share" after the launch.
-/// Under it: the bar everyone's check-ins fill, the prize so far, and the
-/// members.
+/// Home, the one screen. At the top: the rounds, one card each, swiped
+/// sideways (they also move on by themselves). The card in view is the
+/// selected round and everything under it is about that round: the streak
+/// as the hero numeral, today's state, the prize and the launch pool, the
+/// members, and ONE primary action that changes with it:
+///   "Join Demo Day · 1,000 USD" -> "Check in · Demo Day" -> "Checked in"
+///   (with a hint about tomorrow) -> "Launch Demo Day" once the bar is full
+///   (anyone) -> "Claim · Demo Day" after the launch.
+/// The action floats over the content on a scrim that is opaque behind it.
+///
+/// So that nobody pays into a round they did not mean: the cards move on by
+/// themselves only until the first touch on Home in this session
+/// ([AppState.autoAdvance]), the action's label names the round it acts on,
+/// and the action is for the round its label named when it was pressed (the
+/// sheets it opens keep that round).
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.state, this.showBar = true});
   final AppState state;
@@ -46,9 +55,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   AppState get _state => widget.state;
 
-  /// Other people's check-ins move the bar, so Home reads the round again
+  /// Other people's check-ins move the bar, so Home reads the rounds again
   /// every twenty seconds while it is open.
   Timer? _poll;
+
+  final _scroll = ScrollController();
+  final _slider = GlobalKey<RoundSliderState>();
+
+  /// How tall the floating action is right now. The scrolling content ends
+  /// that far above the bottom, so its last card can be read in full.
+  double _actionHeight = 260;
 
   @override
   void initState() {
@@ -56,12 +72,24 @@ class _HomeScreenState extends State<HomeScreen> {
     _poll = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!_busy) _state.refresh();
     });
+    _state.addListener(_changed);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
   }
 
   @override
   void dispose() {
+    _state.removeListener(_changed);
     _poll?.cancel();
+    _scroll.dispose();
     super.dispose();
+  }
+
+  /// A sentence the state wants said once (a link that leads nowhere).
+  void _changed() {
+    final notice = _state.notice;
+    if (notice == null || !mounted) return;
+    _state.notice = null;
+    showMessage(context, notice);
   }
 
   Future<void> _run(Future<String> Function() action, String done) async {
@@ -79,98 +107,199 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openResult() => GoRouter.maybeOf(context)?.go('/result');
+  /// The result of [round]: the round named on the button that was pressed.
+  void _openResult(Round round) {
+    if (_state.selected != round.id) _state.select(round.launcher);
+    GoRouter.maybeOf(context)?.go('/result');
+  }
+
+  /// The first touch on Home (a finger, a mouse button, a wheel or a
+  /// trackpad scroll): from now until the app is opened again the cards
+  /// never move by themselves.
+  void _touched() {
+    _state.stopAutoAdvance();
+    _slider.currentState?.touched();
+  }
+
+  /// The cards move on by themselves only while nobody has touched Home yet
+  /// and Home is what the person is looking at: no sheet, dialog or other
+  /// screen over it, nothing being sent, and the cards still in view.
+  bool _canAdvance() =>
+      mounted &&
+      _state.autoAdvance &&
+      !_busy &&
+      (ModalRoute.of(context)?.isCurrent ?? true) &&
+      (!_scroll.hasClients || _scroll.offset < 140);
+
+  void _select(int index, {required bool byPerson}) {
+    final rounds = _state.rounds;
+    if (index < 0 || index >= rounds.length) return;
+    if (_error != null) setState(() => _error = null);
+    _state.select(rounds[index].launcher, remember: byPerson);
+  }
+
+  /// One card per round. The selected round's numbers are the chain's when
+  /// it could be read.
+  List<RoundCardInfo> get _cards => [
+    for (final r in _state.rounds)
+      r.id == _state.selected
+          ? RoundCardInfo(
+              round: (_state.round ?? r).copyWith(
+                featured: r.featured,
+                unlisted: r.unlisted,
+              ),
+              totalCheckIns: _state.totalCheckIns,
+              launched: _state.launched,
+              joined: _state.isMember,
+            )
+          : RoundCardInfo(
+              round: r,
+              totalCheckIns: r.totalCheckIns,
+              launched: r.launched,
+              joined: _state.isMemberOf(r.launcher),
+            ),
+  ];
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _state,
     builder: (context, _) {
       final round = _state.round;
+      Widget inset(Widget child) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+        child: child,
+      );
       return Scaffold(
-        body: Stack(
-          children: [
-            SafeArea(
-              bottom: false,
-              child: RefreshIndicator(
-                onRefresh: _state.refresh,
-                color: context.colors.onVolt,
-                backgroundColor: context.colors.volt,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(
-                    Space.gutter,
-                    Space.s2,
-                    Space.gutter,
-                    260,
-                  ),
-                  children: [
-                    _Header(state: _state),
-                    const SizedBox(height: Space.s6),
-                    if (round == null)
-                      _NoRound(state: _state)
-                    else ...[
-                      if (_state.roundError != null) ...[
-                        ErrorRetry(
-                          text: _state.roundError!,
-                          onRetry: _state.refresh,
+        // A touch anywhere on Home keeps the cards where they are, for good.
+        body: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (_) {
+            _state.stopAutoAdvance();
+            _slider.currentState?.touchDown();
+          },
+          onPointerUp: (_) => _slider.currentState?.touchUp(),
+          onPointerCancel: (_) => _slider.currentState?.touchUp(),
+          onPointerSignal: (_) => _touched(),
+          onPointerPanZoomStart: (_) => _touched(),
+          child: Stack(
+            children: [
+              SafeArea(
+                bottom: false,
+                child: RefreshIndicator(
+                  onRefresh: _state.refresh,
+                  color: context.colors.onVolt,
+                  backgroundColor: context.colors.volt,
+                  child: ListView(
+                    key: const Key('home-list'),
+                    controller: _scroll,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: EdgeInsets.only(
+                      top: Space.s2,
+                      bottom: _actionHeight + Space.s4,
+                    ),
+                    children: [
+                      inset(_Header(state: _state)),
+                      const SizedBox(height: Space.s5),
+                      if (round == null)
+                        inset(_NoRound(state: _state))
+                      else ...[
+                        if (_state.roundError != null) ...[
+                          inset(
+                            ErrorRetry(
+                              text: _state.roundError!,
+                              onRetry: _state.refresh,
+                            ),
+                          ),
+                          const SizedBox(height: Space.s5),
+                        ],
+                        RoundSlider(
+                          key: _slider,
+                          cards: _cards,
+                          index: _state.selectedIndex,
+                          now: _state.now,
+                          onSelect: _select,
+                          onInvite: (r) => showInviteSheet(context, _state, r),
+                          canAdvance: _canAdvance,
+                          autoAdvance: _state.autoAdvance,
                         ),
                         const SizedBox(height: Space.s5),
+                        inset(_StreakHero(state: _state)),
+                        const SizedBox(height: Space.s6),
+                        inset(_PrizeCard(state: _state, round: round)),
+                        const SizedBox(height: Space.s6),
+                        inset(_Members(state: _state, round: round)),
+                        const SizedBox(height: Space.s6),
+                        inset(
+                          _HowItWorks(
+                            key: const Key('how-it-works'),
+                            state: _state,
+                            round: round,
+                          ),
+                        ),
                       ],
-                      _StreakHero(state: _state),
-                      const SizedBox(height: Space.s6),
-                      _BarCard(state: _state, round: round),
-                      const SizedBox(height: 14),
-                      _PrizeCard(state: _state, round: round),
-                      const SizedBox(height: Space.s6),
-                      _Members(state: _state, round: round),
-                      const SizedBox(height: Space.s6),
-                      _HowItWorks(state: _state, round: round),
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: BottomFade(
-                child: SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      Space.gutter,
-                      48,
-                      Space.gutter,
-                      6,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        ..._action(context),
-                        if (widget.showBar) ...[
-                          const SizedBox(height: Space.s3),
-                          const MainTabs(current: 0),
-                        ],
-                      ],
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SizeReporter(
+                  onSize: (size) {
+                    if (mounted && size.height != _actionHeight) {
+                      setState(() => _actionHeight = size.height);
+                    }
+                  },
+                  child: BottomFade(
+                    key: const Key('home-action'),
+                    child: SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          Space.gutter,
+                          BottomFade.defaultRise,
+                          Space.gutter,
+                          6,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (round != null) ..._action(context, round),
+                            if (widget.showBar) ...[
+                              const SizedBox(height: Space.s3),
+                              const MainTabs(current: 0),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     },
   );
 
-  /// The hint, the one primary action, and at most one quiet extra.
-  List<Widget> _action(BuildContext context) {
+  /// The hint, the one primary action, and at most one quiet extra, for
+  /// [round], the selected round as this frame shows it. The label names
+  /// the round, and every press acts on [round] and no other: the address
+  /// is taken here, where the label is made, not read again later.
+  List<Widget> _action(BuildContext context, Round round) {
     final t = context.type;
     final c = context.colors;
     const usd = AppConfig.quoteSymbol;
     final stage = _state.stage;
+    final at = round.launcher;
+    // A press that began on one round's button never lands on another's: a
+    // new round is a new button, and the press in flight is dropped.
+    final key = ValueKey('action-${round.id}');
+    // A long name is cut short inside the label; the words around it stay.
+    final name = round.name.trim().isEmpty ? 'this round' : round.name.trim();
 
     Widget hint(String text) => Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -192,8 +321,10 @@ class _HomeScreenState extends State<HomeScreen> {
           PillButton(
             kind: PillKind.volt,
             icon: Icons.bolt_rounded,
-            label: 'Join for ${formatMoney(_state.deposit, usd)}',
-            onPressed: () => showJoinSheet(context, _state),
+            label: 'Join $name · ${formatMoney(_state.deposit, usd)}',
+            shrink: name,
+            key: key,
+            onPressed: () => showJoinSheet(context, _state, round),
           ),
         ];
       case HomeStage.checkIn:
@@ -207,8 +338,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           PillButton(
             icon: Icons.check_rounded,
-            label: 'Check in today',
-            onPressed: () => showCheckInSheet(context, _state),
+            label: 'Check in · $name',
+            shrink: name,
+            key: key,
+            onPressed: () => showCheckInSheet(context, _state, round),
           ),
         ];
       case HomeStage.checkedIn:
@@ -237,14 +370,19 @@ class _HomeScreenState extends State<HomeScreen> {
           PillButton(
             kind: PillKind.volt,
             icon: Icons.rocket_launch_rounded,
-            label: 'Launch the token',
+            label: 'Launch $name',
+            shrink: name,
+            key: key,
             busy: _busy,
             busyLabel: _state.funding
                 ? 'Preparing your wallet…'
                 : 'Launching on Flap…',
             onPressed: short > BigInt.zero
                 ? null
-                : () => _run(_state.launch, 'Launched. The token is live.'),
+                : () => _run(
+                    () => _state.launch(launcher: at),
+                    'Launched. The token is live.',
+                  ),
           ),
           if (short > BigInt.zero) ...[
             const SizedBox(height: 10),
@@ -252,12 +390,12 @@ class _HomeScreenState extends State<HomeScreen> {
               kind: PillKind.glass,
               height: Sizes.buttonSmall,
               label: 'Sponsor the launch pool',
-              onPressed: () => showSponsorSheet(context, _state),
+              onPressed: () => showSponsorSheet(context, _state, round),
             ),
           ] else if (canCheckInFirst && !_busy)
             _TextAction(
               label: 'Check in first',
-              onPressed: () => showCheckInSheet(context, _state),
+              onPressed: () => showCheckInSheet(context, _state, round),
             ),
         ];
       case HomeStage.claim:
@@ -270,26 +408,38 @@ class _HomeScreenState extends State<HomeScreen> {
           PillButton(
             kind: PillKind.volt,
             icon: Icons.auto_awesome_rounded,
-            label: 'Claim your share',
-            onPressed: _openResult,
+            label: 'Claim · $name',
+            shrink: name,
+            key: key,
+            onPressed: () => _openResult(round),
           ),
         ];
       case HomeStage.result:
         return [
           hint('The token launched. You have no check-ins in this round.'),
-          PillButton(label: 'See the result', onPressed: _openResult),
+          PillButton(
+            label: 'See the result · $name',
+            shrink: name,
+            key: key,
+            onPressed: () => _openResult(round),
+          ),
         ];
       case HomeStage.refund:
         return [
           hint('The bar did not fill in time. Your deposit is yours again.'),
           PillButton(
             icon: Icons.undo_rounded,
-            label: 'Take your deposit back',
+            label: 'Deposit back · $name',
+            shrink: name,
+            key: key,
             busy: _busy,
             busyLabel: _state.funding
                 ? 'Preparing your wallet…'
                 : 'Returning your deposit…',
-            onPressed: () => _run(_state.refund, 'Your deposit is back.'),
+            onPressed: () => _run(
+              () => _state.refund(launcher: at),
+              'Your deposit is back.',
+            ),
           ),
         ];
       case HomeStage.ended:
@@ -325,8 +475,8 @@ class _TextAction extends StatelessWidget {
   );
 }
 
-/// A greeting and the round's name; the balance and the wallet's orb on the
-/// right, which opens Account.
+/// A greeting and how many rounds there are; the balance and the wallet's
+/// orb on the right, which opens Account.
 class _Header extends StatelessWidget {
   const _Header({required this.state});
   final AppState state;
@@ -352,7 +502,11 @@ class _Header extends StatelessWidget {
                 Text(_greeting, style: t.title(24)),
                 const SizedBox(height: 3),
                 Text(
-                  state.round?.name ?? AppConfig.productName,
+                  switch (state.rounds.length) {
+                    0 => AppConfig.productName,
+                    1 => '1 round',
+                    final n => '$n rounds',
+                  },
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: t.body(14).copyWith(color: c.text2),
@@ -516,70 +670,6 @@ class _StreakHero extends StatelessWidget {
   }
 }
 
-/// The world bar: everyone's check-ins against the goal, as a tick gauge.
-class _BarCard extends StatelessWidget {
-  const _BarCard({required this.state, required this.round});
-  final AppState state;
-  final Round round;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.type;
-    final c = context.colors;
-    final total = state.totalCheckIns;
-    final goal = round.checkInGoal;
-    return GlassCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(child: Overline('The bar')),
-              Text(
-                state.launched
-                    ? 'Full'
-                    : state.pastDeadline
-                    ? 'Closed ${formatDate(round.deadline)}'
-                    : 'Closes ${formatDate(round.deadline)}',
-                style: t.body(12, FontWeight.w500).copyWith(color: c.text2),
-              ),
-            ],
-          ),
-          const SizedBox(height: Space.s2),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(formatCount(total), style: t.metric(44)),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  '/ ${formatCount(goal)} check-ins',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: t.body(14, FontWeight.w500).copyWith(color: c.text2),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: Space.s3),
-          TickGauge(
-            progress: state.barProgress,
-            label: '${formatCount(total)} of ${formatCount(goal)} check-ins',
-          ),
-          const SizedBox(height: Space.s3),
-          Text(
-            'Everyone\'s check-ins fill this one bar. When it is full, a '
-            'token launches on Flap.',
-            style: t.body(13).copyWith(color: c.text2),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// The prize so far in dot-matrix numerals, beside the launch pool.
 class _PrizeCard extends StatelessWidget {
   const _PrizeCard({required this.state, required this.round});
@@ -654,7 +744,7 @@ class _PrizeCard extends StatelessWidget {
                     button: true,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: () => showSponsorSheet(context, state),
+                      onTap: () => showSponsorSheet(context, state, round),
                       child: const AppChip(
                         text: 'Sponsor',
                         icon: Icons.add_rounded,
@@ -736,23 +826,20 @@ class _Members extends StatelessWidget {
             style: t.body(13).copyWith(color: c.text2),
           ),
         ],
-        if (AppConfig.webBaseUrl.isNotEmpty) ...[
-          const SizedBox(height: Space.s3),
-          Semantics(
-            button: true,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: AppConfig.webBaseUrl));
-                showMessage(context, 'Invite link copied.');
-              },
-              child: const AppChip(
-                text: 'Copy invite link',
-                icon: Icons.link_rounded,
-              ),
+        const SizedBox(height: Space.s3),
+        Semantics(
+          button: true,
+          label: 'Invite someone to ${round.name}',
+          excludeSemantics: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => showInviteSheet(context, state, round),
+            child: const AppChip(
+              text: 'Invite someone',
+              icon: Icons.ios_share_rounded,
             ),
           ),
-        ],
+        ),
       ],
     );
   }
@@ -842,7 +929,7 @@ class _MemberRow extends StatelessWidget {
 /// The rules of the round in six lines, with what the server can and cannot
 /// do said plainly.
 class _HowItWorks extends StatelessWidget {
-  const _HowItWorks({required this.state, required this.round});
+  const _HowItWorks({super.key, required this.state, required this.round});
   final AppState state;
   final Round round;
 

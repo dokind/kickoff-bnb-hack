@@ -74,8 +74,8 @@ The attester is one address, fixed when the round is created: the key of our ser
 | Part | Folder | What it does |
 |---|---|---|
 | Contracts | [`contracts/`](contracts) | `CheckInLauncherFactory`, `CheckInLauncher`, `StreakVaultFactory`, `StreakVault` (Solidity 0.8.26, Foundry), forked from Flap's Crowd launcher and vault example. They hold the deposits, the sponsor money, the reserved tokens and the tax, and apply the rules above. |
-| Server | [`verifier/`](verifier) | HTTP server (Hono, viem). Accepts a member's daily report and signs the check-in; relays what the chain says about the current round; keeps streaks and the members it has seen; sends a new wallet 0.03 test BNB once for gas. It sends no transaction to the Launcher or the vault. |
-| App | [`app/`](app) | One Flutter app, our own UI. Web build (main): onboarding with a silent device wallet, Home with one action that follows the round (join, check in, launch, claim, refund), sponsor, result, account. Phone build: the same, plus steps from Apple Health / Health Connect. |
+| Server | [`verifier/`](verifier) | HTTP server (Hono, viem). Finds every round our factory created from the factory's creation events and serves the list; accepts a member's daily report and signs the check-in for that round; relays what the chain says about each round; keeps streaks and the members it has seen; sends a new wallet 0.03 test BNB once for gas. It sends no transaction to the Launcher or the vault. |
+| App | [`app/`](app) | One Flutter app, our own UI. Web build (main): onboarding with a silent device wallet, Home with every listed round as cards that move on by themselves and one action that follows the round on screen (join, check in, launch, claim, refund), an invite link and QR code per round, sponsor, result, account. Phone build: the same, plus steps from Apple Health / Health Connect. |
 | Scripts | [`scripts/`](scripts) | `deploy-testnet.sh` deploys the factories and prints the app build commands. `run-round.ts` runs one whole round on testnet. |
 
 Each part's README has the full reference: [`contracts/README.md`](contracts/README.md),
@@ -97,10 +97,38 @@ Deployed 25 November 2026 from `0xc1bD6aC9311b9345ae8023201875518429c8BF58`; the
 | Flap Portal | `0x000042108465206185A077Edc3F3fd2b49060000` |
 | Test USD (quote token, 18 decimals, anyone can mint) | `0x190C989D5665a0e404B444b53CAE9AbCfb600157` |
 
-Two rounds have been opened with these factories on testnet: one complete ("Bangkok Showup",
-Launcher `0xe1c165C295ED8bC0abA2a81c2a524564689BCeAB`) and one left open for the demo ("Demo Day",
-Launcher `0x378d729aE7122e5Cf7d6f4ed8797710d2503EDb5`). Every address and transaction is in
-[PROOF.md](PROOF.md).
+Three rounds have been opened with these factories on testnet (the factory's
+`CheckInLauncherCreated` events, read on 26 November 2026):
+
+| Round | Launcher | Created by | State on 26 Nov 2026 |
+|---|---|---|---|
+| "Bangkok Showup" | `0xe1c165C295ED8bC0abA2a81c2a524564689BCeAB` | `scripts/run-round.ts` (the deployer wallet) | launched, 3 of 3 |
+| "Demo Day" | `0x378d729aE7122e5Cf7d6f4ed8797710d2503EDb5` | `scripts/run-round.ts` (the deployer wallet) | open, 4 of 5, the server's featured round |
+| "morning movers" | `0x74B9218cC901fa4b295C3B021c246E6f1022915B` | the app's "Start a new round", wallet `0x580d21E31B49D8D21AD1d4E79F676142577e2997` | open, 0 of 6, no members yet |
+
+Every address and transaction of the first two is in [PROOF.md](PROOF.md).
+
+## Many rounds, round links and unlisted rounds
+
+- **Every round is found on chain.** The server reads the factory's creation events from the block
+  the factory was deployed in (144816444), keeps what it found in its store and looks again every
+  10 seconds. Nobody has to tell it about a new round.
+- **Home shows the listed rounds as cards** that move on by themselves every 5 seconds and stop
+  while the screen is touched. The server's featured round comes first, then rounds this wallet has
+  joined, then open rounds by nearest deadline, launched ones and ended ones. The streak, the action
+  button, the prize and the members under the cards belong to the card on screen.
+- **A round has a link**: `https://<site>/#/r/<launcher>`. Opening it selects that round. The
+  "Invite" sheet shows the link, a copy button and a QR code.
+- **A round can be unlisted.** "Start a new round" has an "Unlisted" switch; the creator's wallet
+  signs the choice and the server keeps it. Unlisted means exactly this: the round is not shown in
+  the app's public list. Anyone with the link can still open and join it, and anyone reading the
+  chain can find it. It is not hidden data.
+- **When a new round appears in the list.** At once when its creator's app registers it as listed;
+  never when it is registered as unlisted; otherwise three minutes after its creation, so a round
+  whose creator is about to register it as unlisted is not shown in between.
+- **The featured round** is the one set with `CURRENT_LAUNCHER` or `POST /admin/round`. The earlier
+  single-round routes (`/round`, `/me/:address`, `/members`, `/checkin`) still answer for it, so
+  app builds from before this change keep working.
 
 ## What the three parts agree on
 
@@ -116,15 +144,21 @@ Checked by tests on each side and by the fork run described under "Status".
   One worked vector is pinned in the contracts' test, reproduced byte for byte by
   `verifier/test/attest.test.ts`, and the app's `checkIn(day, signature)` calldata for it equals
   `cast calldata`.
-- **Texts a member signs** (personal_sign): `Cypher Run checkin <launcher> <YYYY-MM-DD> <steps>` and
-  `Cypher Run faucet <address>`. The app writes addresses in lower case; the server accepts lower case
-  or checksummed. The product name is one constant in the server and one in the app
+- **Texts a member signs** (personal_sign): `Cypher Run checkin <launcher> <YYYY-MM-DD> <steps>`,
+  `Cypher Run faucet <address>` and, by a round's creator only,
+  `Cypher Run round <launcher> <listed|unlisted>`. The app writes addresses in lower case; the server
+  accepts lower case or checksummed. The round text carries no date: someone who has seen a creator's
+  signature could send it again, which only sets that same choice again. The product name is one constant in the server and one in the app
   (`verifier/src/product.ts`, `app/lib/config.dart`); renaming it changes the signed texts on both
   sides. `contracts/src/Product.sol` still says "Showup": it is only used in the description the
   deployed contracts report, and they were not redeployed.
-- **API.** `GET /round`, `GET /me/:address`, `GET /members`, `POST /checkin`, `POST /faucet`,
-  `POST /admin/round`, each also under `/api`. Amounts are decimal strings in whole tokens. The web
-  build calls the API on its own origin under `/api`.
+- **API.** `GET /rounds` (the listed rounds), `POST /rounds` (the creator lists or unlists a round),
+  and per round `GET /rounds/:launcher`, `GET /rounds/:launcher/me/:address`,
+  `GET /rounds/:launcher/members`, `POST /rounds/:launcher/checkin`. For the featured round the
+  earlier `GET /round`, `GET /me/:address`, `GET /members`, `POST /checkin` answer the same. Also
+  `POST /faucet` and `POST /admin/round`. Every route is also under `/api`. Amounts are decimal
+  strings in whole tokens. The web build calls the API on its own origin under `/api`. An app build
+  talking to a server from before `/rounds` (404) falls back to the single-round routes.
 - **Days are UTC** everywhere. The server signs for today only; the contract also accepts yesterday.
 - **Transactions** are legacy type at 1 gwei with explicit gas limits, from the app, the server and
   the scripts. Fee estimation on this testnet answers 1 wei and such transactions are never mined.
@@ -185,7 +219,9 @@ flutter build web --release \
 
 `ATTESTER_ADDRESS` must be the address of the server's key (`ATTESTER_PRIVATE_KEY`, or the earlier
 name `VERIFIER_PRIVATE_KEY`, in `verifier/.env`). A round created with another attester cannot get
-check-ins signed by this server. Phone builds also take `--dart-define=VERIFIER_URL=https://<site>/api`.
+check-ins signed by this server, and this server leaves it out of the public list. Phone builds also
+take `--dart-define=VERIFIER_URL=https://<site>/api` and, for the invite links they hand out,
+`--dart-define=WEB_BASE_URL=https://<site>`.
 
 Hosting (the web build and the server on one HTTPS address, `/` and `/api/`) is described in
 [HOSTING.md](HOSTING.md). The server needs `ALLOW_SELF_REPORTED=true` for check-ins typed in a
@@ -218,8 +254,9 @@ script and sent as self-reported; everything on chain is real.
 5. **Launch the token**, from this ordinary wallet. The result screen shows the token and your share.
 6. **Claim your share.** Run the script again for the trading and the other members' claims.
 
-A round can also be opened from the app (Account, "Start a new round"); the server is then pointed
-at the new address with `POST /api/admin/round`.
+A round can also be opened from the app (Account, "Start a new round"). The server finds it on
+chain by itself and it shows on Home; see "Many rounds, round links and unlisted rounds".
+`POST /api/admin/round` only changes which round is featured.
 
 Things to know before a demo: days are UTC, so a new day starts at 07:00 in Bangkok and one wallet
 can check in once per day; the pool must reach 1,500 test USD (five members at 1,000, or fewer plus
@@ -227,7 +264,8 @@ a sponsor); the phone build counts steps since 00:00 UTC against the server's `M
 
 ## Status
 
-Checked on 25 November 2026.
+Checked on 25 November 2026; the server and app test counts, the many-rounds lines and the phone
+build line on 26 November 2026.
 
 Done and checked:
 
@@ -235,9 +273,17 @@ Done and checked:
   Portal on a fork), 63 pass without one with the fork suite skipped. The two factories are deployed
   on BSC testnet; both addresses have code and the Launcher factory reads back its paired vault
   factory, the Portal and the test USD token.
-- **Server.** 83 tests in 7 files pass and the strict typecheck passes.
-- **App.** `flutter analyze` is clean, 114 tests pass (one more, the fork test below, is skipped
+- **Server.** 125 tests in 8 files pass and the strict typecheck passes.
+- **App.** `flutter analyze` is clean, 167 tests pass (one more, the fork test below, is skipped
   unless it is given a fork), and the web release build succeeds with the deployed addresses.
+- **Many rounds, on the hosted address** ([HOSTING.md](HOSTING.md)). The factory's creation events
+  name three rounds and `/api/rounds` lists the same three, including "morning movers", which was
+  started from the app. Every field the server reports for each equals a direct chain read. The
+  earlier single-round routes answer as before for "Demo Day". The app's own client read the new
+  routes from the real server code, and the signature the app makes for
+  `Cypher Run round <launcher> <listed|unlisted>` recovers to the signer under the server's text.
+  The hosted web app, opened at a round's link, showed three round cards moving by themselves and
+  the Invite sheet.
 - **All three together, on a local fork of BSC testnet taken after the deploy** (so the deployed
   factories themselves, the real server code with its real key, no mocks; nothing sent to the real
   testnet):
@@ -255,8 +301,8 @@ Done and checked:
   ran from open to the last claim: three joins at 500 test USD, a 1,050 sponsor, three check-ins
   (days 2, 1 and 0), `launch()` sent by a member (4.64M gas), 183.48 test USD of trading tax to the
   vault, and claims of 2/3 and 1/3. The server's `/api/round` and `/api/me` matched the chain at
-  each of nine stages. Round 2 is open with the bar at 2 of 5 and is the round the hosted app
-  shows. The trading tax was dispatched to the vault by an outside account within a few blocks of
+  each of nine stages. Round 2 ("Demo Day") was left open with the bar at 2 of 5; on 26 November
+  it stood at 4 of 5 with 6 members and is the hosted server's featured round. The trading tax was dispatched to the vault by an outside account within a few blocks of
   each sale; the script did not have to call `dispatch()`.
 
 Not done or not checked:
@@ -264,11 +310,17 @@ Not done or not checked:
 - The check-ins in both testnet rounds were self-reported test entries from throwaway wallets made
   by `scripts/run-round.ts`, and one of them (round 1, for the day before) was signed by the script
   with the attester key and not through the server. [PROOF.md](PROOF.md) says which.
-- The fork test drives the app's state and services, not the screens. The screens were looked at in
-  a browser against a stand-in server only. Nobody has clicked through the hosted web app against a
-  real round.
-- The phone builds were not run after the rewrite, and reading steps from Apple Health / Health
-  Connect was not tried on a device. iOS needs `pod install` first.
+- The fork test drives the app's state and services, not the screens. At the hosted address only
+  Home, the round cards and the Invite sheet were looked at; the person checking pressed nothing
+  that sends a transaction (join, check in, launch, claim, start a round).
+- No round has been listed or unlisted on the hosted server with its creator's signature
+  (`POST /api/rounds` was only seen refusing a wallet that is not the creator), and a round created
+  after the redeploy has not been watched appearing in the list. Both are covered by the server's
+  tests and the fork run.
+- Unlisted is not hidden: it keeps a round out of the app's public list and nothing more.
+- The iOS app builds for the simulator (debug) and for a device (release) after `pod install`, with
+  the hosted address built in. Neither build was installed or run, the Android build was not built,
+  and reading steps from Apple Health / Health Connect was not tried on a device.
 - The faucet has not sent a transaction on the real testnet (only on the fork).
 - Step counts are whatever the client sends, signed by the member's key. The server cannot check
   that they came from health data, and on the web they are typed in.

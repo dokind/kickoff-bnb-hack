@@ -5,6 +5,10 @@
 // requires. It also remembers the accepted days (for streaks), relays what the chain says about
 // the round, and hands out gas money. It cannot launch early, block a launch, choose who is paid
 // beyond signing daily check-ins, or move funds. Check-ins are attested, not proven.
+//
+// Rounds: every route about a round exists twice. `/rounds/:launcher/...` names the round;
+// `/round`, `/me`, `/members` and `/checkin` are the same routes for the featured round (the one
+// set with CURRENT_LAUNCHER or POST /admin/round). GET /rounds is the app's public list.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
@@ -13,10 +17,22 @@ import type { Attester } from "./attest.js";
 import type { Chain, ClaimState, MemberState, RoundState } from "./chain.js";
 import { dayIndexAt, dayString, streaks } from "./days.js";
 import { DRIP_BNB_WEI, FAUCET_MESSAGES, MIN_BALANCE_WEI, RESERVE_WEI, faucetRefusal } from "./faucet.js";
-import { SERVICE_NAME, checkInMessage, faucetMessage } from "./product.js";
+import { SERVICE_NAME, checkInMessage, faucetMessage, roundMessage } from "./product.js";
+import { LISTING_DELAY_SECONDS, createRounds, type Rounds } from "./rounds.js";
 import { DEFAULT_MIN_STEPS, checkReport, parseSteps } from "./rules.js";
 import type { Store } from "./store.js";
 import type { CheckIn, FaucetDrip, RoundRef, Source } from "./types.js";
+
+/** GET /rounds reads an open round from the chain again after this long; a launched or expired one
+ *  after CLOSED_CACHE_FACTOR times as long. Between reads it answers from memory. */
+export const LIST_CACHE_MS = 4_000;
+const CLOSED_CACHE_FACTOR = 15;
+/** When a round cannot be read, GET /rounds shows what it read last, but nothing older than this. */
+const LIST_STALE_MS = 300_000;
+/** Rounds read from the chain at the same time for GET /rounds. */
+const LIST_READS_AT_ONCE = 6;
+
+export type RoundStatus = "open" | "launched" | "expired";
 
 export interface Deps {
   store: Store;
@@ -36,6 +52,17 @@ export interface Deps {
   clientIp?: (c: Context) => string;
   /** Address of a token's page on Flap, with `{token}` where the token address goes. */
   flapTokenUrl?: string;
+  /** The rounds our factory created. Default: none are discovered, only the featured round is known. */
+  rounds?: Rounds;
+  /** See LIST_CACHE_MS. 0 reads every round on every GET /rounds. */
+  listCacheMs?: number;
+  /** GET /rounds scans for new rounds first when the last scan is older than this. */
+  roundsMaxAgeMs?: number;
+  /** ...and waits at most this long for that scan before answering with what is known. */
+  roundsWaitMs?: number;
+  /** POST /rounds looks again this many times, this far apart, for a launcher the RPC does not show
+   *  yet: the creator's app registers a round right after its creation transaction. */
+  registerRetry?: { times: number; waitMs: number };
 }
 
 /** The address (lower-case) that personal_signed `message`, or null if the signature is malformed. */
@@ -68,14 +95,22 @@ export function createApp({
   chain,
   attester,
   adminToken,
-  now = () => Math.floor(Date.now() / 1000),
+  now: clock,
   defaultRound,
   minSteps = DEFAULT_MIN_STEPS,
   allowSelfReported = false,
   faucetEnabled = false,
   clientIp = () => "unknown",
   flapTokenUrl,
+  rounds = createRounds({ store }),
+  listCacheMs = LIST_CACHE_MS,
+  roundsMaxAgeMs = 20_000,
+  roundsWaitMs = 2_500,
+  registerRetry = { times: 2, waitMs: 1_500 },
 }: Deps) {
+  const now = clock ?? (() => Math.floor(Date.now() / 1000));
+  /** Milliseconds, for the short-lived memory of GET /rounds. Follows an injected clock. */
+  const nowMs = clock ? () => clock() * 1000 : () => Date.now();
   const app = new Hono();
   // The web app calls this server from a browser, so every response carries CORS headers and
   // OPTIONS preflights are answered here (204) before any route runs.
@@ -84,6 +119,7 @@ export function createApp({
   type Status = 400 | 401 | 403 | 404 | 409 | 422 | 503;
   const err = (c: Context, status: Status, error: string, message: string) => c.json({ error, message }, status);
   const noRound = (c: Context) => err(c, 404, "no_round", "no round is set on this server");
+  const notOurs = (c: Context) => err(c, 404, "no_round", "no round with this address was created through this app's factory");
   const chainDown = (c: Context) => err(c, 503, "chain_unavailable", "could not read the round on chain; try again");
 
   async function body(c: Context): Promise<Record<string, unknown>> {
@@ -98,7 +134,29 @@ export function createApp({
     return defaultRound ? { launcher: defaultRound.launcher.toLowerCase(), name: defaultRound.name ?? "", setAt: 0 } : null;
   }
 
+  type Found = { ref: RoundRef } | Response;
+  /** For the routes without a launcher in the path: the featured round. */
+  const featuredRound = async (c: Context): Promise<Found> => {
+    const ref = await currentRound();
+    return ref ? { ref } : noRound(c);
+  };
+  /**
+   * For `/rounds/:launcher/...`: that round, when our factory created it (or it is the featured
+   * round). A launcher not seen yet is looked for on chain first.
+   */
+  const namedRound = async (c: Context): Promise<Found> => {
+    const launcher = addr(c.req.param("launcher"));
+    if (!launcher) return err(c, 400, "bad_launcher", "launcher must be an address");
+    const featured = await currentRound();
+    if (featured?.launcher === launcher) return { ref: featured };
+    const found = await rounds.find(launcher);
+    if (found.round) return { ref: { launcher, name: "", setAt: found.round.createdAt } };
+    return found.complete ? notOurs(c) : chainDown(c);
+  };
+
   const ourAttester = attester?.address.toLowerCase() ?? null;
+
+  const statusOf = (s: RoundState): RoundStatus => (s.launched ? "launched" : now() > s.deadline ? "expired" : "open");
 
   /** GET /round. Amounts are decimal strings in whole tokens; `raw` holds the same in smallest units. */
   function roundView(ref: RoundRef, s: RoundState) {
@@ -155,8 +213,9 @@ export function createApp({
   // ── The round ─────────────────────────────────────────────────────────────
 
   app.get("/round", async (c) => {
-    const ref = await currentRound();
-    if (!ref) return noRound(c);
+    const found = await featuredRound(c);
+    if (found instanceof Response) return found;
+    const { ref } = found;
     try {
       return c.json(roundView(ref, await chain.round(ref.launcher)));
     } catch {
@@ -164,11 +223,25 @@ export function createApp({
     }
   });
 
-  app.get("/me/:address", async (c) => {
+  // The same object as GET /round, for any round our factory created, plus `unlisted`.
+  app.get("/rounds/:launcher", async (c) => {
+    const found = await namedRound(c);
+    if (found instanceof Response) return found;
+    const { ref } = found;
+    const unlisted = (await store.getListing(ref.launcher))?.unlisted ?? false;
+    try {
+      return c.json({ ...roundView(ref, await chain.round(ref.launcher)), unlisted });
+    } catch {
+      return chainDown(c);
+    }
+  });
+
+  const meRoute = (which: (c: Context) => Promise<Found>) => async (c: Context) => {
     const address = addr(c.req.param("address"));
     if (!address) return err(c, 400, "bad_address", "address must be an address");
-    const ref = await currentRound();
-    if (!ref) return noRound(c);
+    const found = await which(c);
+    if (found instanceof Response) return found;
+    const { ref } = found;
     const today = dayIndexAt(now());
 
     let round: RoundState, me: MemberState, claim: ClaimState | null;
@@ -213,11 +286,14 @@ export function createApp({
         refundable: me.refundable.toString(),
       },
     });
-  });
+  };
+  app.get("/me/:address", meRoute(featuredRound));
+  app.get("/rounds/:launcher/me/:address", meRoute(namedRound));
 
-  app.get("/members", async (c) => {
-    const ref = await currentRound();
-    if (!ref) return noRound(c);
+  const membersRoute = (which: (c: Context) => Promise<Found>) => async (c: Context) => {
+    const found = await which(c);
+    if (found instanceof Response) return found;
+    const { ref } = found;
     const today = dayIndexAt(now());
     const checkIns = await store.getCheckIns(ref.launcher);
     // The Launcher has no list of members to read, so this is everyone this server has seen as a
@@ -240,6 +316,129 @@ export function createApp({
     }));
     rows.sort((a, b) => b.daysOf - a.daysOf || b.streak - a.streak || (a.address < b.address ? -1 : 1));
     return c.json(rows);
+  };
+  app.get("/members", membersRoute(featuredRound));
+  app.get("/rounds/:launcher/members", membersRoute(namedRound));
+
+  // ── The public list ───────────────────────────────────────────────────────
+  // Every round our factory created that is listed. A round is listed when its creator registered
+  // it as listed, or when nobody registered it and it is older than LISTING_DELAY_SECONDS (so a
+  // round whose creator is about to register it as unlisted is never shown in between). A round
+  // registered as unlisted is left out. That is all "unlisted" means: the round is still on chain
+  // for anyone to read, and GET /rounds/:launcher answers for anyone who has its address.
+  //
+  // Rounds this server cannot sign check-ins for (created with another attester) are left out too:
+  // nobody could fill their bar from this app. The featured round is exempt from that and from the
+  // delay, because the operator chose it; an unlisted choice by its creator still applies.
+
+  const listMemory = new Map<string, { state: RoundState; at: number }>();
+  /** A round's state for the list: from memory while fresh, else from the chain. A read that fails
+   *  falls back to what was read last, up to LIST_STALE_MS old; null when there is nothing. */
+  async function listState(launcher: string): Promise<RoundState | null> {
+    const kept = listMemory.get(launcher);
+    if (kept) {
+      const keep = statusOf(kept.state) === "open" ? listCacheMs : listCacheMs * CLOSED_CACHE_FACTOR;
+      if (nowMs() - kept.at < keep) return kept.state;
+    }
+    try {
+      const state = await chain.round(launcher);
+      listMemory.set(launcher, { state, at: nowMs() });
+      return state;
+    } catch {
+      return kept && nowMs() - kept.at < LIST_STALE_MS ? kept.state : null;
+    }
+  }
+
+  app.get("/rounds", async (c) => {
+    await rounds.fresh(roundsMaxAgeMs, roundsWaitMs);
+    const featured = await currentRound();
+    const t = now();
+
+    const listed: { ref: RoundRef; createdAt: number; featured: boolean }[] = [];
+    let featuredFound = false;
+    for (const round of await rounds.all()) {
+      const isFeatured = featured?.launcher === round.launcher;
+      featuredFound ||= isFeatured;
+      const listing = await store.getListing(round.launcher);
+      const show = listing ? !listing.unlisted : isFeatured || t >= round.createdAt + LISTING_DELAY_SECONDS;
+      if (!show) continue;
+      const ref = isFeatured ? featured! : { launcher: round.launcher, name: "", setAt: round.createdAt };
+      listed.push({ ref, createdAt: round.createdAt, featured: isFeatured });
+    }
+    // A featured round our factory did not create (or that has not been found yet) is still shown.
+    if (featured && !featuredFound) listed.push({ ref: featured, createdAt: featured.setAt, featured: true });
+
+    const states: (RoundState | null)[] = [];
+    for (let i = 0; i < listed.length; i += LIST_READS_AT_ONCE) {
+      states.push(...(await Promise.all(listed.slice(i, i + LIST_READS_AT_ONCE).map((r) => listState(r.ref.launcher)))));
+    }
+    // Nothing to show and nothing known: say the chain could not be read instead of "no rounds".
+    if (listed.length > 0 ? states.every((s) => s === null) : !(await rounds.scanned())) return chainDown(c);
+
+    const rows = listed.flatMap((r, i) => {
+      const s = states[i];
+      if (!s) return [];
+      if (!r.featured && ourAttester !== null && s.attester !== ourAttester) return [];
+      const v = roundView(r.ref, s);
+      return [
+        {
+          createdAt: r.createdAt,
+          item: {
+            launcher: v.launcher,
+            name: v.name,
+            deposit: v.deposit,
+            liquidityBps: v.liquidityBps,
+            checkInGoal: v.checkInGoal,
+            totalCheckIns: v.totalCheckIns,
+            memberCount: v.memberCount,
+            prizeNow: v.prizeNow,
+            poolQuoteNow: v.poolQuoteNow,
+            deadline: v.deadline,
+            launched: v.launched,
+            token: v.token,
+            vault: v.vault,
+            state: statusOf(s),
+            featured: r.featured,
+          },
+        },
+      ];
+    });
+    // Featured first; then open rounds, the nearest deadline first; then launched ones, the newest
+    // first; then expired ones, the most recently expired first.
+    const group = (x: (typeof rows)[number]) => (x.item.featured ? 0 : x.item.state === "open" ? 1 : x.item.state === "launched" ? 2 : 3);
+    rows.sort((a, b) => {
+      const g = group(a) - group(b);
+      if (g !== 0) return g;
+      const order = group(a) === 1 ? a.item.deadline - b.item.deadline : group(a) === 2 ? b.createdAt - a.createdAt : b.item.deadline - a.item.deadline;
+      return order || (a.item.launcher < b.item.launcher ? -1 : 1);
+    });
+    return c.json({ rounds: rows.map((r) => r.item) });
+  });
+
+  // The creator of a round says whether it is on the public list. Signed with the wallet that
+  // created the round (the factory's creation event names it); the creator may call it again.
+  // The signed text has no date in it: a signature seen once can be sent again to set the same
+  // choice again. Nothing here touches the round on chain.
+  app.post("/rounds", async (c) => {
+    const b = await body(c);
+    const launcher = addr(b.launcher);
+    if (!launcher) return err(c, 400, "bad_launcher", "launcher must be an address");
+    const unlisted = b.unlisted;
+    if (typeof unlisted !== "boolean") return err(c, 400, "bad_unlisted", "unlisted must be true or false");
+    const badSignature = () => err(c, 401, "bad_signature", "signature is not the round creator's");
+    if (typeof b.signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(b.signature)) return badSignature();
+
+    let found = await rounds.find(launcher);
+    for (let i = 0; !found.round && i < registerRetry.times; i++) {
+      await new Promise((resolve) => setTimeout(resolve, registerRetry.waitMs));
+      found = await rounds.find(launcher);
+    }
+    if (!found.round) return found.complete ? notOurs(c) : chainDown(c);
+    const text = (subject: string) => roundMessage(subject, unlisted);
+    if (!(await signedEitherForm(found.round.creator, b.signature, text, launcher))) return badSignature();
+
+    await store.putListing(launcher, { unlisted, by: found.round.creator, at: now() });
+    return c.json({ launcher, unlisted });
   });
 
   // ── Check-in ──────────────────────────────────────────────────────────────
@@ -247,9 +446,10 @@ export function createApp({
   // the answer carries the attester's signature, and the member's wallet sends
   // CheckInLauncher.checkIn(dayIndex, attesterSignature) itself.
 
-  app.post("/checkin", async (c) => {
-    const ref = await currentRound();
-    if (!ref) return noRound(c);
+  const checkInRoute = (which: (c: Context) => Promise<Found>) => async (c: Context) => {
+    const found = await which(c);
+    if (found instanceof Response) return found;
+    const { ref } = found;
     const b = await body(c);
     const address = addr(b.address);
     if (!address) return err(c, 400, "bad_address", "address must be an address");
@@ -298,7 +498,9 @@ export function createApp({
     }
     const attesterSignature = await attester.signCheckIn(ref.launcher, address, today);
     return c.json({ day, dayIndex: today, attesterSignature, repeat: Boolean(existing) });
-  });
+  };
+  app.post("/checkin", checkInRoute(featuredRound));
+  app.post("/rounds/:launcher/checkin", checkInRoute(namedRound));
 
   // ── Faucet ────────────────────────────────────────────────────────────────
   // Sends a new wallet a little test BNB once, for gas. It does not send test USD: getting test

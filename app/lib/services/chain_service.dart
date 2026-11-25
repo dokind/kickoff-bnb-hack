@@ -287,6 +287,11 @@ class ChainService {
     );
   }
 
+  /// Whether [member] has paid the deposit of the round at [launcher]. One
+  /// read, for "You're in" on a round's card.
+  Future<bool> isMemberOf(String launcher, String member) =>
+      _read<bool>(_launcher(launcher), 'isMember', [_addr(member)]);
+
   /// After the launch: the vault and token addresses and this wallet's share.
   Future<ShareChain> shareState(String launcher, String member) async {
     final c = _launcher(launcher);

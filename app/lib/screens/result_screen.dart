@@ -45,13 +45,15 @@ class _ResultScreenState extends State<ResultScreen> {
     super.dispose();
   }
 
-  Future<void> _claim() async {
+  /// Claims from the round at [launcher]: the one this screen named when
+  /// the button was pressed.
+  Future<void> _claim(String? launcher) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final tx = await _state.claim();
+      final tx = await _state.claim(launcher: launcher);
       if (!mounted) return;
       setState(() => _tx = tx);
       showMessage(
@@ -118,6 +120,10 @@ class _ResultScreenState extends State<ResultScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
+                  if (round != null) ...[
+                    RoundLabel(round.name),
+                    const SizedBox(height: Space.s1),
+                  ],
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
@@ -330,6 +336,7 @@ class _ResultScreenState extends State<ResultScreen> {
                 right: 0,
                 bottom: 0,
                 child: BottomFade(
+                  rise: 30,
                   child: SafeArea(
                     top: false,
                     child: Padding(
@@ -358,7 +365,7 @@ class _ResultScreenState extends State<ResultScreen> {
                               busyLabel: _state.funding
                                   ? 'Preparing your wallet…'
                                   : 'Claiming…',
-                              onPressed: _claim,
+                              onPressed: () => _claim(round?.launcher),
                             )
                           else
                             const PillButton(

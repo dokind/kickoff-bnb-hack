@@ -2,22 +2,35 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
 
-/// Opens the sponsor sheet over the current screen.
-Future<void> showSponsorSheet(BuildContext context, AppState state) =>
-    showAppSheet<void>(context, builder: (_) => SponsorSheet(state: state));
+/// Opens the sponsor sheet for [round] over the current screen.
+Future<void> showSponsorSheet(
+  BuildContext context,
+  AppState state,
+  Round round,
+) => showAppSheet<void>(
+  context,
+  builder: (_) => SponsorSheet(state: state, round: round),
+);
 
 /// Optional: anyone may add test USD that goes only to the launch pool. It
 /// earns no share and comes back to the sponsor if the round does not
 /// launch. Flap will not open a pool under its floor, so a small round needs
 /// this to launch.
+///
+/// The sheet is about [round] from the moment it opens until it closes,
+/// whatever card is in view on Home behind it.
 class SponsorSheet extends StatefulWidget {
-  const SponsorSheet({super.key, required this.state});
+  const SponsorSheet({super.key, required this.state, required this.round});
   final AppState state;
+
+  /// The round the sheet was opened for.
+  final Round round;
 
   @override
   State<SponsorSheet> createState() => _SponsorSheetState();
@@ -35,7 +48,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
     super.initState();
     // Start with what the pool is short of, rounded up to a whole dollar.
     final unit = wholeUnits(1);
-    final short = _state.poolShort;
+    final short = _state.poolShortOf(widget.round.id);
     final whole = (short + unit - BigInt.one) ~/ unit;
     _amount = TextEditingController(
       text: whole > BigInt.zero ? '$whole' : '100',
@@ -59,7 +72,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
       _error = null;
     });
     try {
-      await _state.sponsor(amount);
+      await _state.sponsor(amount, launcher: widget.round.launcher);
       if (!mounted) return;
       showMessage(
         context,
@@ -90,6 +103,10 @@ class _SponsorSheetState extends State<SponsorSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              RoundLabel(
+                (_state.roundOf(widget.round.id) ?? widget.round).name,
+              ),
+              const SizedBox(height: Space.s1),
               Semantics(
                 header: true,
                 child: Text('Sponsor the launch pool', style: t.title(30)),
@@ -109,7 +126,12 @@ class _SponsorSheetState extends State<SponsorSheet> {
                   children: [
                     KeyValueRow(
                       'In the pool now',
-                      formatMoney(_state.poolQuoteNow, usd),
+                      formatMoney(
+                        _state.roundOf(widget.round.id) == null
+                            ? widget.round.poolQuoteNow
+                            : _state.poolQuoteNowOf(widget.round.id),
+                        usd,
+                      ),
                     ),
                     KeyValueRow(
                       'Flap needs',

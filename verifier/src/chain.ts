@@ -1,11 +1,13 @@
 // Chain access with viem: reads of a round (CheckInLauncher and, after the launch, its
-// StreakVault) and the faucet's gas transfers. BSC testnet only.
+// StreakVault), the factory's creation events (which rounds exist), and the faucet's gas transfers.
+// BSC testnet only.
 //
 // This server sends no transaction to the Launcher or the vault. Members send join, checkIn,
 // launch, refund and claim themselves; the only transactions sent from here are the faucet's.
 import { createPublicClient, createWalletClient, http, parseAbi, zeroAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { bscTestnet } from "viem/chains";
+import type { CreatedRound } from "./types.js";
 
 type Address = `0x${string}`;
 
@@ -47,6 +49,9 @@ export const vaultAbi = parseAbi([
   "function claimedQuote(address member) view returns (uint256)",
 ]);
 export const tokenAbi = parseAbi(["function decimals() view returns (uint8)"]);
+/** Emitted once by CheckInLauncherFactory for every round it creates. `creator` is the wallet that
+ *  called the Flap Portal. */
+export const factoryAbi = parseAbi(["event CheckInLauncherCreated(address indexed launcher, address indexed creator, bytes32 launchSalt)"]);
 
 /** A round as the CheckInLauncher reports it. Amounts are in the quote token's smallest units. */
 export interface RoundState {
@@ -104,6 +109,17 @@ export interface FaucetWallet {
   sendBnb(to: string, wei: bigint): Promise<string>;
 }
 
+/** The creation events of our CheckInLauncherFactory. Present only when a factory is configured. */
+export interface FactoryLogs {
+  /** The factory's address, lower-case. */
+  address: string;
+  /** The latest block number the RPC knows. */
+  head(): Promise<number>;
+  /** Rounds created in blocks `fromBlock` to `toBlock`, both included. One eth_getLogs call; the RPC
+   *  may refuse a range it finds too wide. */
+  created(fromBlock: number, toBlock: number): Promise<CreatedRound[]>;
+}
+
 export interface Chain {
   round(launcher: string): Promise<RoundState>;
   member(launcher: string, address: string, dayIndex: number): Promise<MemberState>;
@@ -113,12 +129,14 @@ export interface Chain {
   /** Test BNB balance of any address, in wei. */
   balanceOf(address: string): Promise<bigint>;
   faucet?: FaucetWallet;
+  factory?: FactoryLogs;
 }
 
 const lower = (address: string) => address.toLowerCase();
 const orNull = (address: string) => (address === zeroAddress ? null : lower(address));
 
-export function createChain(rpcUrl: string, privateKey?: string): Chain {
+/** `factory` is the address of our CheckInLauncherFactory; without it no rounds are discovered. */
+export function createChain(rpcUrl: string, privateKey?: string, factory?: string): Chain {
   const transport = http(rpcUrl);
   const client = createPublicClient({ chain: bscTestnet, transport });
   // A Launcher's configuration is set once at creation, so it is read once per round.
@@ -245,6 +263,25 @@ export function createChain(rpcUrl: string, privateKey?: string): Chain {
 
     balanceOf: (address) => client.getBalance({ address: address as Address }),
   };
+  if (factory) {
+    const address = lower(factory) as Address;
+    const event = factoryAbi[0];
+    reads.factory = {
+      address,
+      head: async () => Number(await client.getBlockNumber({ cacheTime: 0 })),
+      created: async (fromBlock, toBlock) => {
+        const logs = await client.getLogs({ address, event, fromBlock: BigInt(fromBlock), toBlock: BigInt(toBlock), strict: true });
+        const found: CreatedRound[] = [];
+        for (const log of logs) {
+          if (log.removed) continue;
+          // Most nodes put the block's timestamp on the log; the others are asked for the block.
+          const at = log.blockTimestamp ?? (await client.getBlock({ blockNumber: log.blockNumber })).timestamp;
+          found.push({ launcher: lower(log.args.launcher), creator: lower(log.args.creator), block: Number(log.blockNumber), createdAt: Number(at) });
+        }
+        return found;
+      },
+    };
+  }
   if (!privateKey) return reads;
 
   const account = privateKeyToAccount(privateKey as Address);

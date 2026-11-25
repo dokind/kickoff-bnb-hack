@@ -12,3 +12,10 @@ export const checkInMessage = (launcher: string, day: string, steps: string | nu
 
 /** Text a wallet signs (personal_sign) to ask the faucet for gas: `Cypher Run faucet <address>`. */
 export const faucetMessage = (address: string) => `${PRODUCT_NAME} faucet ${address}`;
+
+/**
+ * Text a round's creator signs (personal_sign) to put the round on the app's public list or keep it
+ * off: `Cypher Run round <launcher> <listed|unlisted>`, the launcher in lower case.
+ */
+export const roundMessage = (launcher: string, unlisted: boolean) =>
+  `${PRODUCT_NAME} round ${launcher} ${unlisted ? "unlisted" : "listed"}`;

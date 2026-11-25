@@ -18,49 +18,52 @@ Future<void> pumpHome(WidgetTester tester, AppState state) async {
 }
 
 /// The one primary action: the pill with [label].
-Finder action(String label) => find.widgetWithText(PillButton, label);
+Finder action(String label) =>
+    find.byWidgetPredicate((w) => w is PillButton && w.label == label);
 
 bool enabled(WidgetTester tester, String label) =>
     tester.widget<PillButton>(action(label)).onPressed != null;
 
 void main() {
-  testWidgets('not joined: "Join for 1,000 USD" opens the join sheet', (
-    tester,
-  ) async {
-    final state = await makeState();
-    await pumpHome(tester, state);
+  testWidgets(
+    'not joined: "Join Morning Movers · 1,000 USD" opens the join sheet',
+    (tester) async {
+      final state = await makeState();
+      await pumpHome(tester, state);
 
-    expect(action('Join for 1,000 USD'), findsOneWidget);
-    expect(find.byType(PillButton), findsOneWidget, reason: 'one action');
-    expect(find.text('Round open · not joined yet'), findsOneWidget);
-    // The streak is the hero numeral.
-    expect(find.text('YOUR STREAK'), findsOneWidget);
-    expect(find.text('0'), findsWidgets);
-    expect(find.text('days'), findsOneWidget);
+      expect(action('Join Morning Movers · 1,000 USD'), findsOneWidget);
+      expect(find.byType(PillButton), findsOneWidget, reason: 'one action');
+      expect(find.text('Round open · not joined yet'), findsOneWidget);
+      // The streak is the hero numeral.
+      expect(find.text('YOUR STREAK'), findsOneWidget);
+      expect(find.text('0'), findsWidgets);
+      expect(find.text('days'), findsOneWidget);
 
-    await tester.tap(action('Join for 1,000 USD'));
-    await settle(tester, 10);
-    expect(find.text('Pay the deposit'), findsOneWidget);
-  });
+      await tester.tap(action('Join Morning Movers · 1,000 USD'));
+      await settle(tester, 10);
+      expect(find.text('Pay the deposit'), findsOneWidget);
+    },
+  );
 
-  testWidgets('joined, not checked in: "Check in today" opens the check-in', (
-    tester,
-  ) async {
-    final state = await makeState(chain: FakeChain(isMember: true));
-    await pumpHome(tester, state);
+  testWidgets(
+    'joined, not checked in: "Check in · Morning Movers" opens the check-in',
+    (tester) async {
+      final state = await makeState(chain: FakeChain(isMember: true));
+      await pumpHome(tester, state);
 
-    expect(action('Check in today'), findsOneWidget);
-    expect(enabled(tester, 'Check in today'), isTrue);
-    expect(find.text('Not checked in today'), findsOneWidget);
-    expect(
-      find.text('Self-reported in the browser. Testnet only.'),
-      findsOneWidget,
-    );
+      expect(action('Check in · Morning Movers'), findsOneWidget);
+      expect(enabled(tester, 'Check in · Morning Movers'), isTrue);
+      expect(find.text('Not checked in today'), findsOneWidget);
+      expect(
+        find.text('Self-reported in the browser. Testnet only.'),
+        findsOneWidget,
+      );
 
-    await tester.tap(action('Check in today'));
-    await settle(tester, 10);
-    expect(find.text('Self-reported, testnet only'), findsOneWidget);
-  });
+      await tester.tap(action('Check in · Morning Movers'));
+      await settle(tester, 10);
+      expect(find.text('Self-reported, testnet only'), findsOneWidget);
+    },
+  );
 
   testWidgets('checked in: the action is disabled with a hint about tomorrow', (
     tester,
@@ -84,7 +87,7 @@ void main() {
     expect(find.text('7 days in this round'), findsOneWidget);
   });
 
-  testWidgets('bar full: anyone can "Launch the token"', (tester) async {
+  testWidgets('bar full: anyone can "Launch Morning Movers"', (tester) async {
     final chain = FakeChain(totalCheckIns: 6, pool: 1500);
     final state = await makeState(
       chain: chain,
@@ -94,18 +97,18 @@ void main() {
     await pumpHome(tester, state);
 
     expect(state.isMember, isFalse);
-    expect(action('Launch the token'), findsOneWidget);
-    expect(enabled(tester, 'Launch the token'), isTrue);
+    expect(action('Launch Morning Movers'), findsOneWidget);
+    expect(enabled(tester, 'Launch Morning Movers'), isTrue);
     expect(
       find.text('The bar is full. Anyone can launch the token now.'),
       findsOneWidget,
     );
 
-    await tester.tap(action('Launch the token'));
+    await tester.tap(action('Launch Morning Movers'));
     await settle(tester);
     expect(chain.calls, ['launch']);
     // The same screen moves on to the result.
-    expect(action('See the result'), findsOneWidget);
+    expect(action('See the result · Morning Movers'), findsOneWidget);
     expect(bannerNote.value!.text, 'Launched. The token is live.');
     bannerNote.value = null;
   });
@@ -120,7 +123,7 @@ void main() {
     );
     await pumpHome(tester, state);
 
-    expect(enabled(tester, 'Launch the token'), isFalse);
+    expect(enabled(tester, 'Launch Morning Movers'), isFalse);
     expect(
       find.text(
         'The bar is full, but the launch pool is 600 USD short of what Flap '
@@ -142,7 +145,7 @@ void main() {
     await tester.tap(action('Add to the launch pool'));
     await settle(tester, 10);
     expect(chain.calls, ['mint 600', 'sponsor 600']);
-    expect(enabled(tester, 'Launch the token'), isTrue);
+    expect(enabled(tester, 'Launch Morning Movers'), isTrue);
     bannerNote.value = null;
   });
 
@@ -156,17 +159,17 @@ void main() {
     );
     await pumpHome(tester, state);
 
-    await tester.tap(action('Launch the token'));
+    await tester.tap(action('Launch Morning Movers'));
     await settle(tester);
     expect(find.text('The launch was rejected. Try again.'), findsOneWidget);
     expect(chain.calls, isEmpty);
-    await tester.tap(action('Launch the token'));
+    await tester.tap(action('Launch Morning Movers'));
     await settle(tester);
     expect(chain.calls, ['launch']);
     bannerNote.value = null;
   });
 
-  testWidgets('launched, with days: "Claim your share"', (tester) async {
+  testWidgets('launched, with days: "Claim · Morning Movers"', (tester) async {
     final state = await makeState(
       chain: FakeChain(
         launched: true,
@@ -182,8 +185,8 @@ void main() {
     );
     await pumpHome(tester, state);
 
-    expect(action('Claim your share'), findsOneWidget);
-    expect(enabled(tester, 'Claim your share'), isTrue);
+    expect(action('Claim · Morning Movers'), findsOneWidget);
+    expect(enabled(tester, 'Claim · Morning Movers'), isTrue);
     expect(find.text('Token launched'), findsOneWidget);
     expect(
       find.text('The token launched. Your share is waiting in the vault.'),
@@ -191,17 +194,19 @@ void main() {
     );
   });
 
-  testWidgets('launched, no days: "See the result"', (tester) async {
+  testWidgets('launched, no days: "See the result · Morning Movers"', (
+    tester,
+  ) async {
     final state = await makeState(
       chain: FakeChain(launched: true, totalCheckIns: 6),
       server: FakeServer()..round = roundJson(launched: true, totalCheckIns: 6),
     );
     await pumpHome(tester, state);
-    expect(action('See the result'), findsOneWidget);
-    expect(action('Claim your share'), findsNothing);
+    expect(action('See the result · Morning Movers'), findsOneWidget);
+    expect(action('Claim · Morning Movers'), findsNothing);
   });
 
-  testWidgets('deadline missed: "Take your deposit back", then ended', (
+  testWidgets('deadline missed: "Deposit back · Morning Movers", then ended', (
     tester,
   ) async {
     final chain = FakeChain(isMember: true, refundable: 1000);
@@ -209,7 +214,7 @@ void main() {
     await pumpHome(tester, state);
 
     expect(find.text('Round ended'), findsOneWidget); // the badge
-    await tester.tap(action('Take your deposit back'));
+    await tester.tap(action('Deposit back · Morning Movers'));
     await settle(tester);
     expect(chain.calls, ['refund']);
     expect(action('Round ended'), findsOneWidget);
@@ -241,15 +246,25 @@ void main() {
     );
     await pumpHome(tester, state);
 
-    // The bar: everyone's check-ins against the goal, as a tick gauge.
+    // The round's card: the bar is everyone's check-ins against the goal,
+    // as a tick gauge. The count is the chain's (3), not the server's (2).
+    expect(find.text('Morning Movers'), findsOneWidget);
     expect(find.text('THE BAR'), findsOneWidget);
-    expect(find.text('3'), findsWidgets);
-    expect(find.text('/ 6 check-ins'), findsOneWidget);
+    expect(find.text('3 / 6 check-ins'), findsOneWidget);
     expect(find.text('Closes 2 Dec 2026'), findsOneWidget);
+    expect(find.text('Prize so far 2,100 USD'), findsOneWidget);
+    expect(find.text('3 members'), findsOneWidget);
+    expect(find.text('You\'re in'), findsOneWidget);
     expect(find.byType(TickGauge), findsOneWidget);
     expect(tester.widget<TickGauge>(find.byType(TickGauge)).progress, 0.5);
 
     // The prize so far, in dot-matrix numerals.
+    final list = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.text('LAUNCH POOL'),
+      200,
+      scrollable: list,
+    );
     expect(find.text('PRIZE SO FAR'), findsOneWidget);
     expect(
       tester.widget<DotMatrixText>(find.byType(DotMatrixText)).text,
@@ -260,7 +275,6 @@ void main() {
     expect(find.text('of 1,500 USD Flap needs'), findsOneWidget);
 
     // Members: address, days, streak. The person's own row says "You".
-    final list = find.byType(Scrollable).first;
     await tester.scrollUntilVisible(find.text('You'), 200, scrollable: list);
     expect(find.text('0x2000…0002'), findsOneWidget);
     expect(find.text('2 days · streak 2 · in today'), findsOneWidget);
@@ -288,7 +302,7 @@ void main() {
     server.round = roundJson();
     await tester.tap(action('Look again'));
     await settle(tester);
-    expect(action('Join for 1,000 USD'), findsOneWidget);
+    expect(action('Join Morning Movers · 1,000 USD'), findsOneWidget);
   });
 
   testWidgets('server unreachable: one sentence and Retry, no host name', (
@@ -307,7 +321,7 @@ void main() {
     await tester.tap(action('Retry'));
     await settle(tester);
     expect(find.text(VerifierApi.unreachable), findsNothing);
-    expect(action('Join for 1,000 USD'), findsOneWidget);
+    expect(action('Join Morning Movers · 1,000 USD'), findsOneWidget);
   });
 
   testWidgets('wide screens keep the centred 480px column', (tester) async {

@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
 
-/// Opens the join sheet over the current screen.
-Future<void> showJoinSheet(BuildContext context, AppState state) =>
-    showAppSheet<void>(context, builder: (_) => JoinSheet(state: state));
+/// Opens the join sheet for [round] over the current screen.
+Future<void> showJoinSheet(BuildContext context, AppState state, Round round) =>
+    showAppSheet<void>(
+      context,
+      builder: (_) => JoinSheet(state: state, round: round),
+    );
 
 /// Joining a round: what the deposit is and where it goes, then two real
 /// steps with their progress.
@@ -18,9 +22,16 @@ Future<void> showJoinSheet(BuildContext context, AppState state) =>
 ///   2. "Pay deposit": approve, then `join()`.
 /// Before the first transaction the sheet waits for the faucet's gas to
 /// arrive and says "Preparing your wallet".
+///
+/// The sheet is about [round] from the moment it opens until it closes: its
+/// name is over the title, and the deposit is paid into that round whatever
+/// card is in view on Home behind it.
 class JoinSheet extends StatefulWidget {
-  const JoinSheet({super.key, required this.state});
+  const JoinSheet({super.key, required this.state, required this.round});
   final AppState state;
+
+  /// The round named on the button that opened the sheet.
+  final Round round;
 
   @override
   State<JoinSheet> createState() => _JoinSheetState();
@@ -37,6 +48,13 @@ class _JoinSheetState extends State<JoinSheet> {
 
   AppState get _state => widget.state;
 
+  /// The sheet's round as the app reads it now; as it was when the sheet
+  /// opened if it has left the slider since.
+  Round get _round => _state.roundOf(widget.round.id) ?? widget.round;
+  BigInt get _deposit => _state.roundOf(widget.round.id) == null
+      ? widget.round.deposit
+      : _state.depositOf(widget.round.id);
+
   Future<void> _run(Future<void> Function() step) async {
     setState(() {
       _busy = true;
@@ -51,13 +69,12 @@ class _JoinSheetState extends State<JoinSheet> {
     }
   }
 
-  Future<void> _getDollars() =>
-      _run(() => _state.getTestDollars(_state.deposit));
+  Future<void> _getDollars() => _run(() => _state.getTestDollars(_deposit));
 
   Future<void> _pay() async {
     setState(() => _paying = true);
     await _run(() async {
-      await _state.payDeposit();
+      await _state.payDeposit(launcher: widget.round.launcher);
       if (mounted) setState(() => _done = true);
     });
     if (mounted) setState(() => _paying = false);
@@ -84,10 +101,12 @@ class _JoinSheetState extends State<JoinSheet> {
         const Spacer(),
         Icon(Icons.verified_rounded, size: 44, color: c.volt),
         const SizedBox(height: Space.s3),
+        RoundLabel(_round.name),
+        const SizedBox(height: Space.s1),
         Text('YOU\'RE IN.', style: t.display(60)),
         const SizedBox(height: Space.s3),
         Text(
-          '${formatMoney(_state.deposit, AppConfig.quoteSymbol)} is in the '
+          '${formatMoney(_deposit, AppConfig.quoteSymbol)} is in the '
           'round\'s contract. Check in every day you move: each day is one '
           'more part of the prize and of the token.',
           style: t.body(15).copyWith(color: c.text2),
@@ -104,9 +123,8 @@ class _JoinSheetState extends State<JoinSheet> {
   Widget _form(BuildContext context) {
     final t = context.type;
     final c = context.colors;
-    final round = _state.round;
-    if (round == null) return const SizedBox.shrink();
-    final deposit = _state.deposit;
+    final round = _round;
+    final deposit = _deposit;
     const usd = AppConfig.quoteSymbol;
     final hasDollars = _paying || _state.usd >= deposit;
     final preparing = _busy && _state.funding;
@@ -117,6 +135,8 @@ class _JoinSheetState extends State<JoinSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        RoundLabel(round.name),
+        const SizedBox(height: Space.s1),
         Semantics(
           header: true,
           child: Text('Pay the deposit', style: t.title(30)),

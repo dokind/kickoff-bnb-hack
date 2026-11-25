@@ -42,7 +42,12 @@ String? _address(Object? value) {
   return value.toLowerCase() == AppConfig.zeroAddress ? null : value;
 }
 
-/// The current round (GET /round), as the server read it from the chain.
+/// Where a round is: joining and checking in, launched, or past its
+/// deadline with no launch.
+enum RoundPhase { open, launched, expired }
+
+/// One round, as the server read it from the chain: an entry of GET /rounds,
+/// or the fuller answer of GET /rounds/:launcher and GET /round.
 class Round {
   Round({
     required this.launcher,
@@ -62,6 +67,8 @@ class Round {
     this.token,
     this.vault,
     this.flapUrl,
+    this.featured = false,
+    this.unlisted = false,
   });
 
   /// The round's contract (CheckInLauncher).
@@ -102,6 +109,68 @@ class Round {
   /// The token's page on Flap, when the server knows it.
   final String? flapUrl;
 
+  /// The round the server puts first (its current round).
+  final bool featured;
+
+  /// Not shown in the app's public list. Anyone with the link can still open
+  /// and join it, and the chain is public.
+  final bool unlisted;
+
+  /// The launcher address in lower case: how the app tells rounds apart.
+  String get id => launcher.toLowerCase();
+
+  RoundPhase phaseAt(DateTime now) => launched
+      ? RoundPhase.launched
+      : now.isAfter(deadline)
+      ? RoundPhase.expired
+      : RoundPhase.open;
+
+  Round copyWith({bool? featured, bool? unlisted}) => Round(
+    launcher: launcher,
+    name: name,
+    deposit: deposit,
+    liquidityBps: liquidityBps,
+    checkInGoal: checkInGoal,
+    totalCheckIns: totalCheckIns,
+    memberCount: memberCount,
+    totalDeposits: totalDeposits,
+    totalSponsored: totalSponsored,
+    poolQuoteNow: poolQuoteNow,
+    prizeNow: prizeNow,
+    deadline: deadline,
+    launched: launched,
+    minSteps: minSteps,
+    token: token,
+    vault: vault,
+    flapUrl: flapUrl,
+    featured: featured ?? this.featured,
+    unlisted: unlisted ?? this.unlisted,
+  );
+
+  /// The same shape the server sends, so a round can be kept on the device
+  /// and read back with [Round.fromJson].
+  Map<String, dynamic> toJson() => {
+    'launcher': launcher,
+    'name': name,
+    'deposit': formatUnits(deposit, maxFraction: 18),
+    'liquidityBps': liquidityBps,
+    'checkInGoal': checkInGoal,
+    'totalCheckIns': totalCheckIns,
+    'memberCount': memberCount,
+    'totalDeposits': formatUnits(totalDeposits, maxFraction: 18),
+    'totalSponsored': formatUnits(totalSponsored, maxFraction: 18),
+    'poolQuoteNow': formatUnits(poolQuoteNow, maxFraction: 18),
+    'prizeNow': formatUnits(prizeNow, maxFraction: 18),
+    'deadline': deadline.millisecondsSinceEpoch ~/ 1000,
+    'launched': launched,
+    'minSteps': minSteps,
+    'token': token,
+    'vault': vault,
+    'flapUrl': flapUrl,
+    'featured': featured,
+    'unlisted': unlisted,
+  };
+
   /// The part of one deposit that goes to the launch pool, and the rest.
   BigInt get depositToPool =>
       deposit * BigInt.from(liquidityBps) ~/ BigInt.from(10000);
@@ -127,10 +196,12 @@ class Round {
     flapUrl: j['flapUrl'] is String && (j['flapUrl'] as String).isNotEmpty
         ? j['flapUrl'] as String
         : null,
+    featured: j['featured'] == true,
+    unlisted: j['unlisted'] == true,
   );
 }
 
-/// One wallet in the current round (GET /me/:address).
+/// One wallet in a round (GET /rounds/:launcher/me/:address).
 class Me {
   Me({
     required this.member,
@@ -175,7 +246,7 @@ class Me {
   );
 }
 
-/// One row of the members list (GET /members).
+/// One row of the members list (GET /rounds/:launcher/members).
 class Member {
   Member({
     required this.address,
@@ -197,7 +268,8 @@ class Member {
   );
 }
 
-/// The server accepted today's check-in (POST /checkin). The app sends
+/// The server accepted today's check-in (POST /rounds/:launcher/checkin). The
+/// app sends
 /// `CheckInLauncher.checkIn(dayIndex, attesterSignature)` itself.
 class CheckInTicket {
   CheckInTicket({
@@ -272,11 +344,15 @@ class VerifierException implements Exception {
   String toString() => message;
 }
 
-/// All access to our server (../verifier). It keeps the current round's
-/// address, the streaks and the members list, runs the gas faucet and is the
-/// attester: it signs that a wallet moved enough on a day. Check-ins are
-/// attested, not proven. The server cannot launch early, block a launch,
+/// All access to our server (../verifier). It finds every round our factory
+/// created, keeps the streaks and the members lists, runs the gas faucet and
+/// is the attester: it signs that a wallet moved enough on a day. Check-ins
+/// are attested, not proven. The server cannot launch early, block a launch,
 /// choose who is paid beyond signing daily check-ins, or move funds.
+///
+/// Every round has its own calls under `/rounds/<launcher>`. A server from
+/// before that knows one round only (`/round`, `/me`, `/members`,
+/// `/checkin`); [rounds] answers null there and the app falls back to those.
 class VerifierApi {
   VerifierApi({http.Client? client, String? baseUrl})
     : _http = client ?? http.Client(),
@@ -295,6 +371,12 @@ class VerifierApi {
   /// `Cypher Run faucet <address>`
   static String faucetMessage(String address) =>
       '${AppConfig.productName} faucet ${address.toLowerCase()}';
+
+  /// `Cypher Run round <launcher> <listed|unlisted>`, signed by the wallet
+  /// that created the round.
+  static String roundMessage(String launcher, {required bool unlisted}) =>
+      '${AppConfig.productName} round ${launcher.toLowerCase()} '
+      '${unlisted ? 'unlisted' : 'listed'}';
 
   /// personal_sign (EIP-191) with the device key, hex encoded.
   static String sign(EthPrivateKey key, String message) => bytesToHex(
@@ -378,7 +460,42 @@ class VerifierApi {
     return body;
   }
 
-  /// The current round, or null when none is open (404 `no_round`).
+  /// The listed rounds, in the server's order: its featured round, then
+  /// open rounds by nearest deadline, launched ones, ended ones. Null when
+  /// the server is from before it knew more than one round (404).
+  Future<List<Round>?> rounds() async {
+    final dynamic body;
+    try {
+      body = await _get('/rounds');
+    } on VerifierException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
+    final list = body is List
+        ? body
+        : (body is Map ? body['rounds'] as List? : null) ?? const [];
+    return [
+      for (final r in list)
+        if (r is Map<String, dynamic> && isAddress('${r['launcher']}'))
+          Round.fromJson(r),
+    ];
+  }
+
+  /// One round by its address, listed or not. Null when our factory did not
+  /// create it (404 `no_round`).
+  Future<Round?> roundAt(String launcher) async {
+    try {
+      return Round.fromJson(
+        _map(await _get('/rounds/${launcher.toLowerCase()}')),
+      );
+    } on VerifierException catch (e) {
+      if (e.code == 'no_round' || e.status == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// The server's current round, or null when none is open (404
+  /// `no_round`). The one round a server from before `/rounds` knows.
   Future<Round?> round() async {
     try {
       return Round.fromJson(_map(await _get('/round')));
@@ -388,13 +505,21 @@ class VerifierApi {
     }
   }
 
-  /// One wallet's place in the current round: days, streak, share.
-  Future<Me> me(String address) async =>
-      Me.fromJson(_map(await _get('/me/${address.toLowerCase()}')));
+  /// `/rounds/<launcher>` before a per-round call; nothing for the calls of
+  /// a server that knows one round only.
+  static String _in(String? launcher) =>
+      launcher == null ? '' : '/rounds/${launcher.toLowerCase()}';
 
-  /// The members of the current round, most days first.
-  Future<List<Member>> members() async {
-    final body = await _get('/members');
+  /// One wallet's place in a round: days, streak, share. With no [launcher]
+  /// it asks about the server's current round.
+  Future<Me> me(String address, {String? launcher}) async => Me.fromJson(
+    _map(await _get('${_in(launcher)}/me/${address.toLowerCase()}')),
+  );
+
+  /// The members of a round, most days first. With no [launcher] it asks
+  /// about the server's current round.
+  Future<List<Member>> members({String? launcher}) async {
+    final body = await _get('${_in(launcher)}/members');
     final list = body is List
         ? body
         : (body is Map ? body['members'] as List? : null) ?? const [];
@@ -408,22 +533,45 @@ class VerifierApi {
   /// "healthkit", "healthconnect" or "self" (typed in the browser; the
   /// server takes it on a testnet demo only and stores it flagged). The
   /// answer carries the attester's signature for the contract.
+  ///
+  /// The signed text names the round. [perRound] false posts to the one
+  /// `/checkin` of a server that knows its current round only.
   Future<CheckInTicket> checkIn(
     EthPrivateKey key, {
     required String launcher,
     required int steps,
     required String source,
     DateTime? now,
+    bool perRound = true,
   }) async {
     final day = utcDayKey(now ?? DateTime.now());
     return CheckInTicket.fromJson(
-      await _post('/checkin', {
+      await _post('${_in(perRound ? launcher : null)}/checkin', {
         'address': key.address.with0x.toLowerCase(),
         'steps': steps,
         'source': source,
         'signature': sign(key, checkInMessage(launcher, day, steps)),
       }),
     );
+  }
+
+  /// Tells the server whether a round is shown in the public list. Only the
+  /// wallet that created the round can say; it may call this again to change
+  /// it. Returns what the server now holds.
+  ///
+  /// Unlisted is not hidden: anyone with the link can open and join the
+  /// round, and anyone reading the chain can find it.
+  Future<bool> registerRound(
+    EthPrivateKey key, {
+    required String launcher,
+    required bool unlisted,
+  }) async {
+    final answer = await _post('/rounds', {
+      'launcher': launcher.toLowerCase(),
+      'unlisted': unlisted,
+      'signature': sign(key, roundMessage(launcher, unlisted: unlisted)),
+    });
+    return answer['unlisted'] == true;
   }
 
   /// Asks for a little test BNB for network fees. The server sends it once

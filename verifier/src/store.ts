@@ -1,7 +1,7 @@
 // Storage: in memory, optionally mirrored to a JSON file.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { CheckIn, FaucetDrip, RoundRef } from "./types.js";
+import type { CheckIn, Discovery, FaucetDrip, Listing, RoundRef } from "./types.js";
 
 export interface Store {
   /** The round set with POST /admin/round, if any. */
@@ -16,6 +16,12 @@ export interface Store {
   /** Faucet payouts, one per address: a second put for the same address replaces the first. */
   getFaucetDrips(): Promise<FaucetDrip[]>;
   putFaucetDrip(drip: FaucetDrip): Promise<void>;
+  /** The rounds found in the factory's creation events and how far the scan got. */
+  getDiscovery(): Promise<Discovery | undefined>;
+  putDiscovery(discovery: Discovery): Promise<void>;
+  /** A creator's choice to list or unlist a round, if one was registered. */
+  getListing(launcher: string): Promise<Listing | undefined>;
+  putListing(launcher: string, listing: Listing): Promise<void>;
 }
 
 interface Data {
@@ -25,6 +31,10 @@ interface Data {
   /** launcher -> "<address>#<day>" -> check-in. */
   checkIns: Record<string, Record<string, CheckIn>>;
   faucet: Record<string, FaucetDrip>;
+  // The two below are absent from the file until first written.
+  discovery?: Discovery;
+  /** launcher -> the creator's choice. */
+  listings?: Record<string, Listing>;
 }
 
 /** Pass a file path to keep data across restarts; pass nothing for a pure in-memory store. */
@@ -41,6 +51,8 @@ export class LocalStore implements Store {
         roundMembers: saved.roundMembers ?? {},
         checkIns: saved.checkIns ?? {},
         faucet: saved.faucet ?? {},
+        discovery: saved.discovery,
+        listings: saved.listings,
       };
     }
   }
@@ -79,6 +91,20 @@ export class LocalStore implements Store {
   }
   async putFaucetDrip(drip: FaucetDrip) {
     this.data.faucet[drip.address] = drip;
+    this.save();
+  }
+  async getDiscovery() {
+    return this.data.discovery;
+  }
+  async putDiscovery(discovery: Discovery) {
+    this.data.discovery = { ...discovery, rounds: discovery.rounds.map((r) => ({ ...r })) };
+    this.save();
+  }
+  async getListing(launcher: string) {
+    return this.data.listings?.[launcher];
+  }
+  async putListing(launcher: string, listing: Listing) {
+    (this.data.listings ??= {})[launcher] = listing;
     this.save();
   }
 }

@@ -323,7 +323,7 @@ void main() {
     });
 
     test(
-      'POST /checkin sends address, steps, source and the signature',
+      'the check-in goes to the round: address, steps, source, signature',
       () async {
         final server = FakeServer();
         final ticket = await server.api.checkIn(
@@ -333,8 +333,8 @@ void main() {
           source: 'self',
           now: fixedNow,
         );
-        expect(server.requests, ['POST /checkin']);
-        expect(server.bodies['/checkin'], {
+        expect(server.requests, ['POST /rounds/$launcher/checkin']);
+        expect(server.bodies['/rounds/$launcher/checkin'], {
           'address': testAddress,
           'steps': 6214,
           'source': 'self',
@@ -408,7 +408,10 @@ void main() {
           isA<VerifierException>().having(
             (e) => e.message,
             'message',
-            allOf(contains('Cypher Run\'s server'), isNot(contains('not_member'))),
+            allOf(
+              contains('Cypher Run\'s server'),
+              isNot(contains('not_member')),
+            ),
           ),
         ),
       );
@@ -423,7 +426,10 @@ void main() {
         expect(result.tx, '0xf1');
         expect(server.bodies['/faucet'], {
           'address': testAddress,
-          'signature': VerifierApi.sign(testKey, 'Cypher Run faucet $testAddress'),
+          'signature': VerifierApi.sign(
+            testKey,
+            'Cypher Run faucet $testAddress',
+          ),
         });
       },
     );

@@ -16,6 +16,14 @@ import 'package:pacepact/util/format.dart';
 import 'package:web3dart/web3dart.dart';
 
 const launcher = '0x1000000000000000000000000000000000000001';
+
+/// More rounds, for tests with a slider.
+const launcherB = '0x1000000000000000000000000000000000000002';
+const launcherC = '0x1000000000000000000000000000000000000003';
+const launcherD = '0x1000000000000000000000000000000000000004';
+
+/// The address [FakeChain.createRound] answers.
+const createdLauncher = '0x5000000000000000000000000000000000000005';
 const vault = '0x3000000000000000000000000000000000000003';
 const tokenAddress = '0x4000000000000000000000000000000000007777';
 
@@ -37,10 +45,19 @@ final attesterSignature = '0x${'ab' * 64}1c';
 
 /// The wallet and flags stay in memory.
 class MemoryStore extends WalletStore {
-  MemoryStore({this.key, this.onboarded = false, this.pending});
+  MemoryStore({this.key, this.onboarded = false, this.pending, this.rounds});
   EthPrivateKey? key;
   bool onboarded;
   Map<String, dynamic>? pending;
+
+  /// The rounds this device knows and the one last chosen, as stored.
+  Map<String, dynamic>? rounds;
+
+  @override
+  Future<Map<String, dynamic>?> loadRounds() async => rounds;
+  @override
+  Future<void> saveRounds(Map<String, dynamic> r) async =>
+      rounds = jsonDecode(jsonEncode(r)) as Map<String, dynamic>;
 
   @override
   Future<EthPrivateKey?> load() async => key;
@@ -102,6 +119,21 @@ class FakeChain extends ChainService {
   /// Every write, in order: "mint 1000", "join", "checkIn 20782", ...
   final calls = <String>[];
 
+  /// Other rounds' contracts, by launcher. A launcher that is not here is
+  /// this one.
+  final others = <String, FakeChain>{};
+
+  FakeChain _at(String launcher) => others[launcher.toLowerCase()] ?? this;
+
+  /// The launcher each read and write was for, in order.
+  final asked = <String>[];
+
+  @override
+  Future<bool> isMemberOf(String launcher, String member) async {
+    if (down) throw Exception('rpc down');
+    return _at(launcher).isMember;
+  }
+
   void _write(String name, [String detail = '']) {
     if (fail == name) {
       fail = null;
@@ -122,6 +154,10 @@ class FakeChain extends ChainService {
     DateTime? now,
   }) async {
     if (down) throw Exception('rpc down');
+    final other = _at(launcher);
+    if (!identical(other, this)) {
+      return other.roundState(launcher, member, now: now);
+    }
     return RoundChain(
       deposit: usd(deposit),
       launched: launched,
@@ -154,6 +190,12 @@ class FakeChain extends ChainService {
 
   @override
   Future<String> join(EthPrivateKey key, String launcher, BigInt amount) async {
+    asked.add(launcher.toLowerCase());
+    final other = _at(launcher);
+    if (!identical(other, this)) {
+      dollars -= amount;
+      return other.join(key, launcher, amount);
+    }
     _write('join', formatUnits(amount));
     dollars -= amount;
     isMember = true;
@@ -167,6 +209,7 @@ class FakeChain extends ChainService {
     String launcher,
     BigInt amount,
   ) async {
+    asked.add(launcher.toLowerCase());
     _write('sponsor', formatUnits(amount));
     dollars -= amount;
     pool += num.parse(formatUnits(amount));
@@ -180,6 +223,11 @@ class FakeChain extends ChainService {
     int dayIndex,
     String attesterSignature,
   ) async {
+    asked.add(launcher.toLowerCase());
+    final other = _at(launcher);
+    if (!identical(other, this)) {
+      return other.checkIn(key, launcher, dayIndex, attesterSignature);
+    }
     _write('checkIn', '$dayIndex');
     checkedInToday = true;
     daysOf++;
@@ -189,6 +237,7 @@ class FakeChain extends ChainService {
 
   @override
   Future<String> launch(EthPrivateKey key, String launcher) async {
+    asked.add(launcher.toLowerCase());
     _write('launch');
     launched = true;
     return '0xl1';
@@ -196,6 +245,7 @@ class FakeChain extends ChainService {
 
   @override
   Future<String> refund(EthPrivateKey key, String launcher) async {
+    asked.add(launcher.toLowerCase());
     _write('refund');
     dollars += usd(refundable);
     refundable = 0;
@@ -228,7 +278,7 @@ class FakeChain extends ChainService {
       'createRound',
       '$name $symbol ${formatUnits(deposit)} $liquidityBps $checkInGoal',
     );
-    return '0x5000000000000000000000000000000000000005';
+    return createdLauncher;
   }
 }
 
@@ -253,6 +303,8 @@ class FakeHealth implements HealthService {
 }
 
 Map<String, dynamic> roundJson({
+  String at = launcher,
+  String name = 'Morning Movers',
   int checkInGoal = 6,
   int totalCheckIns = 2,
   int memberCount = 3,
@@ -261,8 +313,8 @@ Map<String, dynamic> roundJson({
   bool launched = false,
   int? deadline,
 }) => {
-  'launcher': launcher,
-  'name': 'Morning Movers',
+  'launcher': at,
+  'name': name,
   'quoteToken': '0x190C989D5665a0e404B444b53CAE9AbCfb600157',
   'deposit': '1000',
   'liquidityBps': 3000,
@@ -301,10 +353,27 @@ Map<String, dynamic> meJson({
 };
 
 /// The server, in memory. Tests change the answers and read what was asked.
+///
+/// It knows every round in [more] besides its current one ([round]), each
+/// under `/rounds/<launcher>`. With [legacy] it is the server from before
+/// that: one round, and 404 for anything under `/rounds`.
 class FakeServer {
-  /// Null answers 404 `no_round`.
+  /// The current (featured) round. Null answers 404 `no_round`.
   Map<String, dynamic>? round = roundJson();
+
+  /// Other rounds our factory created, listed or not.
+  final more = <Map<String, dynamic>>[];
+
+  /// Launchers (lower case) registered as unlisted: left out of GET /rounds.
+  final unlisted = <String>{};
+
+  /// The server from before `/rounds`.
+  bool legacy = false;
+
+  /// What `/me` answers for the current round, and for the others by
+  /// launcher.
   Map<String, dynamic> me = meJson(member: false);
+  final meAt = <String, Map<String, dynamic>>{};
   List<Map<String, dynamic>> members = [
     {
       'address': '0x2000000000000000000000000000000000000002',
@@ -319,11 +388,16 @@ class FakeServer {
       'checkedInToday': false,
     },
   ];
+  final membersAt = <String, List<Map<String, dynamic>>>{};
   Map<String, dynamic> faucet = {'funded': true, 'bnbTx': '0xf1'};
 
   /// What POST /checkin answers; a status of 400 or more is an error body.
   int checkInStatus = 200;
   Map<String, dynamic>? checkIn;
+
+  /// What POST /rounds answers when it is not 200 (an error body).
+  int registerStatus = 200;
+  Map<String, dynamic>? registerError;
 
   /// Every call fails as if there were no connection.
   bool offline = false;
@@ -333,6 +407,13 @@ class FakeServer {
   final bodies = <String, Map<String, dynamic>>{};
 
   int count(String request) => requests.where((r) => r == request).length;
+
+  Map<String, dynamic>? _find(String launcher) {
+    for (final r in [?round, ...more]) {
+      if ('${r['launcher']}'.toLowerCase() == launcher) return r;
+    }
+    return null;
+  }
 
   VerifierApi get api => VerifierApi(
     baseUrl: 'http://server.test',
@@ -344,28 +425,69 @@ class FakeServer {
       }
       http.Response json(Object body, [int status = 200]) =>
           http.Response(jsonEncode(body), status);
-      switch (r.url.path) {
+      final noRound = json({'error': 'no_round'}, 404);
+      http.Response signed() => json(
+        checkIn ??
+            {
+              'day': today,
+              'dayIndex': 20782,
+              'attesterSignature': attesterSignature,
+            },
+        checkInStatus,
+      );
+      final path = r.url.path;
+      switch (path) {
         case '/round':
-          return round == null
-              ? json({'error': 'no_round'}, 404)
-              : json(round!);
+          return round == null ? noRound : json(round!);
         case '/members':
           return json(members);
         case '/faucet':
           return json(faucet);
         case '/checkin':
-          return json(
-            checkIn ??
-                {
-                  'day': today,
-                  'dayIndex': 20782,
-                  'attesterSignature': attesterSignature,
-                },
-            checkInStatus,
-          );
+          return signed();
       }
-      if (r.url.path.startsWith('/me/')) return json(me);
-      return json({'error': 'not_found'}, 404);
+      if (path.startsWith('/me/')) return json(me);
+
+      // Everything under /rounds: the old server answers as any web server
+      // does for a path it does not have.
+      if (!path.startsWith('/rounds') || legacy) {
+        return http.Response('404 Not Found', 404);
+      }
+      if (path == '/rounds' && r.method == 'GET') {
+        return json({
+          'rounds': [
+            for (final x in [?round, ...more])
+              if (!unlisted.contains('${x['launcher']}'.toLowerCase()))
+                {
+                  ...x,
+                  'state': x['launched'] == true ? 'launched' : 'open',
+                  'featured': identical(x, round),
+                }..remove('minSteps'),
+          ],
+        });
+      }
+      if (path == '/rounds' && r.method == 'POST') {
+        if (registerStatus != 200) return json(registerError!, registerStatus);
+        final body = bodies[path]!;
+        final l = '${body['launcher']}';
+        if (_find(l) == null) return noRound;
+        body['unlisted'] == true ? unlisted.add(l) : unlisted.remove(l);
+        return json({'launcher': l, 'unlisted': body['unlisted']});
+      }
+      final parts = path.split('/'); // "", "rounds", launcher, ...
+      final l = parts[2];
+      final found = _find(l);
+      if (found == null) return noRound;
+      final current = identical(found, round);
+      if (parts.length == 3) {
+        return json({...found, 'unlisted': unlisted.contains(l)});
+      }
+      return switch (parts[3]) {
+        'me' => json(meAt[l] ?? (current ? me : meJson(member: false))),
+        'members' => json(membersAt[l] ?? (current ? members : const [])),
+        'checkin' => signed(),
+        _ => http.Response('404 Not Found', 404),
+      };
     }),
   );
 }
@@ -411,6 +533,12 @@ Widget inApp(Widget child) => MaterialApp(
     data: MediaQuery.of(context).copyWith(disableAnimations: true),
     child: c!,
   ),
+  home: Scaffold(backgroundColor: Colors.black, body: child),
+);
+
+/// Like [inApp], with motion on: the round cards move on by themselves.
+Widget inMotion(Widget child) => MaterialApp(
+  theme: inAppTheme,
   home: Scaffold(backgroundColor: Colors.black, body: child),
 );
 
