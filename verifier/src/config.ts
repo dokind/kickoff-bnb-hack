@@ -1,19 +1,38 @@
 // Builds the app from environment variables.
 import { Hono, type Context } from "hono";
-import { isAddress } from "viem";
+import { formatEther, isAddress, parseEther } from "viem";
 import { createApp } from "./app.js";
 import { CHAIN_ID, createAttester, type Attester } from "./attest.js";
 import { createChain } from "./chain.js";
+import { DRIP_BNB_WEI, MAX_DRIP_BNB_WEI, MAX_PER_IP_PER_HOUR, PER_IP_PER_HOUR } from "./faucet.js";
+import {
+  DEFAULT_ORIGIN_CHECK_SECONDS,
+  DEFAULT_ORIGIN_SOURCE_URL,
+  createOriginAnnouncer,
+  hostFromSource,
+  isPlainHost,
+  type OriginAnnouncer,
+} from "./origin.js";
 import { DEFAULT_CHUNK_BLOCKS, createRounds, type Rounds } from "./rounds.js";
 import { DEFAULT_MIN_STEPS, MAX_STEPS } from "./rules.js";
 import { LocalStore } from "./store.js";
 
-/** The key as viem wants it, or an error that does not repeat the value. */
-function readKey(value: string | undefined): `0x${string}` | undefined {
+/** The key as viem wants it, or an error that names the variable and does not repeat the value. */
+function readKey(name: string, value: string | undefined): `0x${string}` | undefined {
   if (!value) return undefined;
   const key = value.startsWith("0x") ? value : `0x${value}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error("ATTESTER_PRIVATE_KEY must be a 32-byte hex key.");
+  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error(`${name} must be a 32-byte hex key.`);
   return key as `0x${string}`;
+}
+
+/** FAUCET_DRIP_BNB: test BNB per wallet as a decimal ("0.03"), in wei. */
+export function dripFromEnv(value: string | undefined): bigint {
+  if (!value) return DRIP_BNB_WEI;
+  const wei = /^\d+(\.\d{1,18})?$/.test(value.trim()) ? parseEther(value.trim()) : -1n;
+  if (wei <= 0n || wei > MAX_DRIP_BNB_WEI) {
+    throw new Error(`FAUCET_DRIP_BNB must be an amount of test BNB above 0 and at most ${formatEther(MAX_DRIP_BNB_WEI)}, such as 0.03.`);
+  }
+  return wei;
 }
 
 /** Our CheckInLauncherFactory on BSC testnet and the block it was deployed in
@@ -35,6 +54,11 @@ export interface Server {
   /** The rounds found on chain. The entry point refreshes it every `refreshSeconds`. */
   rounds: Rounds;
   refreshSeconds: number;
+  /** Writes this server's host to the OriginRegistry. Undefined unless ORIGIN_REGISTRY and the
+   *  attester key are set. The entry point starts it. */
+  origin?: OriginAnnouncer;
+  /** The faucet's settings as read from the environment. */
+  faucet: { dripWei: bigint; perIpPerHour: number; wallet: string | null };
 }
 
 export const appFromEnv = (env: NodeJS.ProcessEnv = process.env) => serverFromEnv(env).app;
@@ -45,12 +69,25 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
     throw new Error(`CHAIN_ID must be ${CHAIN_ID} (BSC testnet). This server runs on testnet only.`);
   }
 
-  // One key, two jobs: it signs check-ins (it must be the round's attester) and its wallet pays the
-  // faucet's gas transfers. VERIFIER_PRIVATE_KEY is the name the earlier server used for the same key.
-  const key = readKey(env.ATTESTER_PRIVATE_KEY || env.VERIFIER_PRIVATE_KEY);
+  // The attester key signs check-ins (it must be the round's attester) and sends setOrigin. Its
+  // wallet also pays the faucet's gas transfers unless FAUCET_PRIVATE_KEY gives the faucet a wallet
+  // of its own. VERIFIER_PRIVATE_KEY is the name the earlier server used for the attester key.
+  const key = readKey("ATTESTER_PRIVATE_KEY", env.ATTESTER_PRIVATE_KEY || env.VERIFIER_PRIVATE_KEY);
+  const faucetKey = readKey("FAUCET_PRIVATE_KEY", env.FAUCET_PRIVATE_KEY);
   let attester: Attester | undefined;
   if (key) attester = createAttester(key);
-  else console.warn("No ATTESTER_PRIVATE_KEY: check-ins cannot be signed and the faucet is off.");
+  else console.warn(`No ATTESTER_PRIVATE_KEY: check-ins cannot be signed${faucetKey ? "" : " and the faucet is off"}.`);
+  const dripWei = dripFromEnv(env.FAUCET_DRIP_BNB);
+  const perIpPerHour = wholeNumber("FAUCET_PER_IP_PER_HOUR", env.FAUCET_PER_IP_PER_HOUR, PER_IP_PER_HOUR, 1, MAX_PER_IP_PER_HOUR);
+
+  // Where this server can be reached: written to the OriginRegistry when ORIGIN_REGISTRY is set.
+  const registry = env.ORIGIN_REGISTRY || undefined;
+  if (registry && !isAddress(registry, { strict: false })) throw new Error("ORIGIN_REGISTRY must be an address.");
+  const originHost = env.ORIGIN_HOST?.trim().toLowerCase() || undefined;
+  if (originHost && !isPlainHost(originHost)) throw new Error("ORIGIN_HOST must be a plain hostname, such as name.trycloudflare.com.");
+  const originSeconds = wholeNumber("ORIGIN_CHECK_SECONDS", env.ORIGIN_CHECK_SECONDS, DEFAULT_ORIGIN_CHECK_SECONDS, 10, 3600);
+  const originSource = env.ORIGIN_SOURCE_URL || DEFAULT_ORIGIN_SOURCE_URL;
+  if (!/^https?:\/\//.test(originSource)) throw new Error("ORIGIN_SOURCE_URL must be an http(s) address.");
 
   // Where rounds are found: the creation events of our factory, from the block it was deployed in.
   const factory = env.LAUNCHER_FACTORY || DEFAULT_FACTORY;
@@ -58,7 +95,15 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
   const fromBlock = wholeNumber("FACTORY_FROM_BLOCK", env.FACTORY_FROM_BLOCK, DEFAULT_FACTORY_FROM_BLOCK, 0, Number.MAX_SAFE_INTEGER);
   const chunkBlocks = wholeNumber("LOG_CHUNK_BLOCKS", env.LOG_CHUNK_BLOCKS, DEFAULT_CHUNK_BLOCKS, 1, 1_000_000);
   const refreshSeconds = wholeNumber("ROUNDS_REFRESH_SECONDS", env.ROUNDS_REFRESH_SECONDS, DEFAULT_ROUNDS_REFRESH_SECONDS, 2, 3600);
-  const chain = createChain(env.RPC_URL, key, factory);
+  const chain = createChain(env.RPC_URL, key, factory, { faucetKey, originRegistry: registry });
+  let origin: OriginAnnouncer | undefined;
+  if (registry && chain.origin) {
+    origin = createOriginAnnouncer({
+      registry: chain.origin,
+      host: originHost ? async () => originHost : () => hostFromSource(originSource),
+      intervalMs: originSeconds * 1000,
+    });
+  } else if (registry) console.warn("ORIGIN_REGISTRY is set but the origin is not announced: it needs ATTESTER_PRIVATE_KEY.");
 
   const launcher = env.CURRENT_LAUNCHER;
   if (launcher && !isAddress(launcher, { strict: false })) throw new Error("CURRENT_LAUNCHER must be an address.");
@@ -71,7 +116,9 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
   if (allowSelfReported) console.warn("ALLOW_SELF_REPORTED=true: typed-in step counts are accepted. Testnet demo only.");
 
   const faucetEnabled = env.FAUCET_ENABLED === "true";
-  if (faucetEnabled && !chain.faucet) console.warn("FAUCET_ENABLED=true but the faucet is off: it needs ATTESTER_PRIVATE_KEY.");
+  if (faucetEnabled && !chain.faucet) {
+    console.warn("FAUCET_ENABLED=true but the faucet is off: it needs FAUCET_PRIVATE_KEY or ATTESTER_PRIVATE_KEY.");
+  }
 
   const trustProxy = env.TRUST_PROXY === "true";
   const store = new LocalStore(env.DATA_FILE || "./data/store.json");
@@ -87,6 +134,9 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
     allowSelfReported,
     faucetEnabled,
     clientIp: (c) => clientIp(c, trustProxy),
+    faucetDripWei: dripWei,
+    faucetPerIpPerHour: perIpPerHour,
+    originHealth: origin?.health,
     flapTokenUrl: env.FLAP_TOKEN_URL || undefined,
     rounds,
     // With the entry point's timer running the list is never this old; without one (tests, another
@@ -95,7 +145,13 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
   });
   // The web app calls this server on its own origin under /api, so the same routes are also served
   // there. A reverse proxy can then pass /api/* through unchanged or strip the prefix; both work.
-  return { app: new Hono().route("/api", api).route("/", api), rounds, refreshSeconds };
+  return {
+    app: new Hono().route("/api", api).route("/", api),
+    rounds,
+    refreshSeconds,
+    origin,
+    faucet: { dripWei, perIpPerHour, wallet: chain.faucet?.address ?? null },
+  };
 }
 
 /**

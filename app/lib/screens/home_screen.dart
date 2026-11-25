@@ -11,10 +11,13 @@ import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
 import '../widgets/dot_matrix.dart';
-import '../widgets/gauges.dart';
 import '../widgets/identicon.dart';
+import '../widgets/launch_floor_line.dart';
 import '../widgets/main_tabs.dart';
+import '../widgets/pot_section.dart';
 import '../widgets/round_slider.dart';
+import '../widgets/so_far_card.dart';
+import '../widgets/streak_block.dart';
 import 'checkin_sheet.dart';
 import 'invite_sheet.dart';
 import 'join_sheet.dart';
@@ -22,9 +25,11 @@ import 'sponsor_sheet.dart';
 
 /// Home, the one screen. At the top: the rounds, one card each, swiped
 /// sideways (they also move on by themselves). The card in view is the
-/// selected round and everything under it is about that round: the streak
-/// as the hero numeral, today's state, the prize and the token pool, the
-/// members, and ONE primary action that changes with it:
+/// selected round and everything under it is about that round: THE PRIZE
+/// first (what showing up is worth here, member by member, and what the
+/// launch still needs), then the streak and today's state, the prize and
+/// the token pool, the rules, the totals so far, and ONE primary action
+/// that changes with it:
 ///   "Join Demo Day · 1,000 USD" -> "Check in · Demo Day" -> "Checked in"
 ///   (with a hint about tomorrow) -> "Launch Demo Day" once the bar is full
 ///   (anyone) -> "Claim · Demo Day" after the launch.
@@ -234,11 +239,20 @@ class _HomeScreenState extends State<HomeScreen> {
                           autoAdvance: _state.autoAdvance,
                         ),
                         const SizedBox(height: Space.s5),
-                        inset(_StreakHero(state: _state)),
+                        // Money first: what showing up is worth here.
+                        inset(
+                          PotSection(
+                            state: _state,
+                            round: round,
+                            onInvite: () =>
+                                showInviteSheet(context, _state, round),
+                          ),
+                        ),
+                        inset(LaunchFloorLine(state: _state, round: round)),
+                        const SizedBox(height: Space.s6),
+                        inset(StreakBlock(state: _state)),
                         const SizedBox(height: Space.s6),
                         inset(_PrizeCard(state: _state, round: round)),
-                        const SizedBox(height: Space.s6),
-                        inset(_Members(state: _state, round: round)),
                         const SizedBox(height: Space.s6),
                         inset(
                           _HowItWorks(
@@ -247,6 +261,15 @@ class _HomeScreenState extends State<HomeScreen> {
                             round: round,
                           ),
                         ),
+                        if (_state.stats != null) ...[
+                          const SizedBox(height: Space.s6),
+                          inset(
+                            SoFarCard(
+                              stats: _state.stats!,
+                              inARound: _state.joined.isNotEmpty,
+                            ),
+                          ),
+                        ],
                       ],
                     ],
                   ),
@@ -375,7 +398,7 @@ class _HomeScreenState extends State<HomeScreen> {
           hint(
             short > BigInt.zero
                 ? 'The bar is full, but the token pool is '
-                      '${formatMoney(short, usd)} short of what Flap needs.'
+                      '${formatTestUsd(short)} short of what Flap needs.'
                 : 'The bar is full. Anyone can launch the token now.',
           ),
           PillButton(
@@ -512,15 +535,26 @@ class _Header extends StatelessWidget {
               children: [
                 Text(_greeting, style: t.title(24)),
                 const SizedBox(height: 3),
-                Text(
-                  switch (state.rounds.length) {
-                    0 => AppConfig.productName,
-                    1 => '1 round',
-                    final n => '$n rounds',
-                  },
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: t.body(14).copyWith(color: c.text2),
+                // Every amount on Home is test money. On a narrow phone
+                // with large text the pill goes under the count rather
+                // than overflow.
+                Wrap(
+                  spacing: Space.s2,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      switch (state.rounds.length) {
+                        0 => AppConfig.productName,
+                        1 => '1 round',
+                        final n => '$n rounds',
+                      },
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.body(14).copyWith(color: c.text2),
+                    ),
+                    const TestnetPill(height: 20),
+                  ],
                 ),
               ],
             ),
@@ -619,68 +653,6 @@ class _NoRound extends StatelessWidget {
   }
 }
 
-/// The streak as the hero numeral, today's state, and the last seven days.
-class _StreakHero extends StatelessWidget {
-  const _StreakHero({required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.type;
-    final c = context.colors;
-    final streak = state.streak;
-    final (text, colour, live) = switch (state.stage) {
-      HomeStage.join => ('Round open · not joined yet', c.volt, false),
-      HomeStage.checkIn => ('Not checked in today', c.volt, true),
-      HomeStage.checkedIn => ('Checked in today', c.success, false),
-      HomeStage.launch => ('Bar full · ready to launch', c.volt, true),
-      HomeStage.claim ||
-      HomeStage.result => ('Token launched', c.success, false),
-      HomeStage.refund || HomeStage.ended => ('Round ended', c.danger, false),
-      _ => ('', c.text, false),
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Overline('Your streak'),
-        Semantics(
-          label: 'Your streak: ${days(streak)}',
-          excludeSemantics: true,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text('$streak', style: t.metric(104, weight: FontWeight.w200)),
-              const SizedBox(width: 10),
-              Text(
-                streak == 1 ? 'day' : 'days',
-                style: t.display(34).copyWith(color: c.text2),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: Space.s2),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            if (text.isNotEmpty)
-              StatusBadge(text: text, color: colour, live: live),
-            if (state.isMember)
-              AppChip(
-                text: '${days(state.daysOf)} in this round',
-                icon: Icons.calendar_today_rounded,
-                height: 28,
-              ),
-          ],
-        ),
-        const SizedBox(height: Space.s4),
-        DayTrack(days: state.week),
-      ],
-    );
-  }
-}
-
 /// The prize so far in dot-matrix numerals, beside the token pool.
 class _PrizeCard extends StatelessWidget {
   const _PrizeCard({required this.state, required this.round});
@@ -739,11 +711,11 @@ class _PrizeCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   state.launched
-                      ? '$usd, in the pool'
+                      ? '$testUsd, in the pool'
                       : short > BigInt.zero
-                      ? 'of ${formatCount(AppConfig.launchPoolFloor)} $usd '
+                      ? 'of ${formatCount(AppConfig.launchPoolFloor)} $testUsd '
                             'Flap needs'
-                      : '$usd, enough for Flap',
+                      : '$testUsd, enough for Flap',
                   textAlign: TextAlign.right,
                   style: t.body(12).copyWith(color: c.text2),
                 ),
@@ -773,170 +745,6 @@ class _PrizeCard extends StatelessWidget {
   }
 }
 
-/// The members: one compact list, most days first.
-class _Members extends StatelessWidget {
-  const _Members({required this.state, required this.round});
-  final AppState state;
-  final Round round;
-
-  /// Rows shown before "and N more".
-  static const _shown = 20;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.type;
-    final c = context.colors;
-    final members = state.members;
-    final count = round.memberCount > members.length
-        ? round.memberCount
-        : members.length;
-    final me = state.hasWallet ? state.address.toLowerCase() : '';
-    var most = 7;
-    for (final m in members) {
-      if (m.daysOf > most) most = m.daysOf;
-    }
-    final ticks = most > 14 ? 14 : most;
-    final rows = members.take(_shown).toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader('Members', trailing: '$count'),
-        const SizedBox(height: 14),
-        if (rows.isEmpty)
-          Text(
-            count == 0
-                ? 'No one has joined yet. Be the first.'
-                : 'The list shows here after the first check-in.',
-            style: t.body(14).copyWith(color: c.text2),
-          )
-        else
-          GlassCard(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Column(
-              children: [
-                for (final (i, m) in rows.indexed) ...[
-                  _MemberRow(
-                    rank: i + 1,
-                    member: m,
-                    isMe: m.address == me,
-                    ticks: ticks,
-                  ),
-                  if (i < rows.length - 1)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 56),
-                      child: Divider(color: c.hairline),
-                    ),
-                ],
-              ],
-            ),
-          ),
-        if (members.length > _shown) ...[
-          const SizedBox(height: Space.s2),
-          Text(
-            'and ${members.length - _shown} more',
-            style: t.body(13).copyWith(color: c.text2),
-          ),
-        ],
-        const SizedBox(height: Space.s3),
-        Semantics(
-          button: true,
-          label: 'Invite someone to ${round.name}',
-          excludeSemantics: true,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => showInviteSheet(context, state, round),
-            child: const AppChip(
-              text: 'Invite someone',
-              icon: Icons.ios_share_rounded,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MemberRow extends StatelessWidget {
-  const _MemberRow({
-    required this.rank,
-    required this.member,
-    required this.isMe,
-    required this.ticks,
-  });
-
-  final int rank;
-  final Member member;
-  final bool isMe;
-
-  /// How many day ticks the row draws.
-  final int ticks;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.type;
-    final c = context.colors;
-    final name = isMe ? 'You' : shortAddress(member.address);
-    final detail =
-        '${days(member.daysOf)} · streak ${member.streak}'
-        '${member.checkedInToday ? ' · in today' : ''}';
-    return Semantics(
-      label: '$rank. $name, $detail',
-      excludeSemantics: true,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 16,
-              child: Text(
-                '$rank',
-                style: t.body(13, FontWeight.w600).copyWith(color: c.text2),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Identicon(address: member.address, size: 30),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: isMe
-                        ? t.body(14, FontWeight.w700).copyWith(color: c.volt)
-                        : t.mono.copyWith(fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(detail, style: t.body(11).copyWith(color: c.text2)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Row(
-              children: [
-                for (var i = 0; i < ticks; i++)
-                  Container(
-                    width: 4,
-                    height: 16,
-                    margin: const EdgeInsets.only(left: 3),
-                    decoration: ShapeDecoration(
-                      shape: const StadiumBorder(),
-                      color: i < member.daysOf
-                          ? (isMe ? c.volt : c.text)
-                          : Colors.white.withValues(alpha: 0.15),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// The rules of the round in six lines, with what the server can and cannot
 /// do said plainly.
 class _HowItWorks extends StatelessWidget {
@@ -946,7 +754,6 @@ class _HowItWorks extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const usd = AppConfig.quoteSymbol;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -959,7 +766,7 @@ class _HowItWorks extends StatelessWidget {
               IconRow(
                 icon: Icons.payments_outlined,
                 text:
-                    'The deposit is ${formatMoney(state.deposit, usd)}, paid '
+                    'The deposit is ${formatTestUsd(state.deposit)}, paid '
                     'once: ${formatBps(10000 - round.liquidityBps)} to the '
                     'prize, ${formatBps(round.liquidityBps)} to the token '
                     'pool.',
@@ -974,8 +781,10 @@ class _HowItWorks extends StatelessWidget {
               IconRow(
                 icon: Icons.rocket_launch_outlined,
                 text:
-                    'When the bar reaches ${formatCount(round.checkInGoal)} '
-                    'check-ins, anyone can launch the token on Flap.',
+                    'Launch needs both: '
+                    '${formatCount(round.checkInGoal)} check-ins and '
+                    '${formatCount(AppConfig.launchPoolFloor)} $testUsd in '
+                    'the token pool. Then anyone can launch it on Flap.',
               ),
               const IconRow(
                 icon: Icons.pie_chart_outline_rounded,

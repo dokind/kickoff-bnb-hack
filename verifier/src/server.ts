@@ -3,7 +3,7 @@ import { serve } from "@hono/node-server";
 import { serverFromEnv } from "./config.js";
 import { SERVICE_NAME } from "./product.js";
 
-const { app, rounds, refreshSeconds } = serverFromEnv();
+const { app, rounds, refreshSeconds, origin } = serverFromEnv();
 const port = Number(process.env.PORT || 8787);
 serve({ fetch: app.fetch, port }, () => console.log(`${SERVICE_NAME} on http://localhost:${port}`));
 
@@ -17,3 +17,10 @@ async function lookForRounds() {
 }
 void lookForRounds();
 setInterval(() => void lookForRounds(), refreshSeconds * 1000).unref();
+
+// Writes this server's public host to the OriginRegistry when it changes (ORIGIN_REGISTRY). Runs on
+// its own timer; requests never wait for it.
+if (origin) {
+  console.log(`Origin announcer on: registry ${origin.health().registry}.`);
+  origin.start();
+}

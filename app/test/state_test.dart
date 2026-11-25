@@ -136,6 +136,60 @@ void main() {
     });
   });
 
+  group('this wallet\'s own days', () {
+    test('known once the chain or the server has answered', () async {
+      final state = await makeState(
+        chain: FakeChain(isMember: true, daysOf: 2),
+      );
+      expect(state.yourDaysKnown, isTrue);
+      expect(state.selectedReadOnce, isTrue);
+
+      // The chain is read, the server is not.
+      final chainOnly = await makeState(
+        chain: FakeChain(isMember: true, daysOf: 2),
+        server: FakeServer()..me = {'member': Object()},
+      );
+      expect(chainOnly.me, isNull);
+      expect(chainOnly.yourDaysKnown, isTrue);
+      expect(chainOnly.daysOf, 2);
+
+      // Neither answered: the 0 is not a count.
+      final neither = await makeState(
+        chain: FakeChain(isMember: true)..down = true,
+        server: FakeServer()..me = {'member': Object()},
+      );
+      expect(neither.yourDaysKnown, isFalse);
+      expect(neither.selectedReadOnce, isTrue);
+    });
+
+    test('a joined round just selected is a member\'s before its days are '
+        'read', () async {
+      final chain = FakeChain();
+      chain.others[launcherB] = FakeChain(
+        isMember: true,
+        daysOf: 3,
+        totalCheckIns: 4,
+      );
+      final server = FakeServer()
+        ..more.add(roundJson(at: launcherB, name: 'Night Owls'))
+        ..meAt[launcherB] = meJson(daysOf: 3, streak: 3);
+      final state = await makeState(chain: chain, server: server);
+      expect(state.joined, contains(launcherB));
+      expect(state.selected, launcher);
+
+      state.select(launcherB);
+      // Nothing of it read yet: a member, with days not known.
+      expect(state.isMember, isTrue);
+      expect(state.yourDaysKnown, isFalse);
+      expect(state.selectedReadOnce, isFalse);
+
+      await state.refresh();
+      expect(state.yourDaysKnown, isTrue);
+      expect(state.selectedReadOnce, isTrue);
+      expect(state.daysOf, 3);
+    });
+  });
+
   group('gas', () {
     test('a new wallet asks the faucet in the background, once', () async {
       final server = FakeServer();

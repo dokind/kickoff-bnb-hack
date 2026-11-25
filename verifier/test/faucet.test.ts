@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAddress } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createApp, type Deps } from "../src/app.js";
+import { createChain } from "../src/chain.js";
+import { dripFromEnv, serverFromEnv } from "../src/config.js";
 import { DRIP_BNB_WEI, GLOBAL_CAP, MIN_BALANCE_WEI, PER_IP_PER_HOUR, RESERVE_WEI, faucetRefusal } from "../src/faucet.js";
 import { faucetMessage } from "../src/product.js";
 import { LocalStore } from "../src/store.js";
@@ -39,6 +41,14 @@ describe("faucet limits (pure)", () => {
     expect(faucetRefusal(recent.slice(1), "0xnew", "1.1.1.1", now)).toBeNull();
     // The oldest one is exactly an hour old a second later.
     expect(faucetRefusal(recent, "0xnew", "1.1.1.1", now + 1)).toBeNull();
+  });
+
+  it("takes another per-IP limit when one is given", () => {
+    const now = 100_000;
+    const room = Array.from({ length: 40 }, (_, i) => drip(`0x${i}`, "1.1.1.1", now - 60));
+    expect(faucetRefusal(room, "0xnew", "1.1.1.1", now)).toBe("rate_limited");
+    expect(faucetRefusal(room, "0xnew", "1.1.1.1", now, 41)).toBeNull();
+    expect(faucetRefusal(room, "0xnew", "1.1.1.1", now, 40)).toBe("rate_limited");
   });
 });
 
@@ -86,6 +96,7 @@ describe("POST /faucet", () => {
       return balances.get(address) ?? 0n;
     };
     chain.faucet = {
+      address: "0xfa00000000000000000000000000000000000001",
       balance: async () => walletBalance,
       sendBnb: async (to, amount) => {
         if (failSend) throw new Error("rpc down");
@@ -214,5 +225,93 @@ describe("POST /faucet", () => {
     expect((await ask(alice)).body).toMatchObject({ funded: false, bnbTx: null, reason: "send_failed" });
     failSend = false;
     expect((await ask(alice)).body).toEqual({ funded: true, bnbTx: "0xbnb1" });
+  });
+
+  it("a room on one network: the per-IP limit and the drip come from the settings", async () => {
+    const drip = 10n ** 16n; // 0.01
+    start({ faucetPerIpPerHour: 7, faucetDripWei: drip });
+    for (let i = 0; i < 7; i++) expect((await ask(accounts[i]!)).body.funded).toBe(true);
+    expect((await ask(accounts[7]!)).body).toMatchObject({ funded: false, reason: "rate_limited" });
+    expect(sent).toHaveLength(7);
+    expect(sent.every((s) => s.amount === drip)).toBe(true);
+    // The reserve check uses the configured drip too.
+    walletBalance = drip + RESERVE_WEI - 1n;
+    expect((await ask(accounts[7]!, "198.51.100.7")).body.reason).toBe("faucet_empty");
+  });
+});
+
+describe("faucet settings from the environment", () => {
+  const env = { RPC_URL: "http://127.0.0.1:9", DATA_FILE: "/nonexistent/cypher-run-test.json" } as NodeJS.ProcessEnv;
+  afterEach(() => vi.restoreAllMocks());
+
+  it("defaults to today's values: 5 per network an hour, 0.03 test BNB", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(serverFromEnv(env).faucet).toMatchObject({ perIpPerHour: 5, dripWei: 3n * 10n ** 16n });
+    expect(dripFromEnv(undefined)).toBe(DRIP_BNB_WEI);
+    expect(dripFromEnv("")).toBe(DRIP_BNB_WEI);
+  });
+
+  it("reads FAUCET_PER_IP_PER_HOUR and FAUCET_DRIP_BNB", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(serverFromEnv({ ...env, FAUCET_PER_IP_PER_HOUR: "60", FAUCET_DRIP_BNB: "0.015" }).faucet).toMatchObject({
+      perIpPerHour: 60,
+      dripWei: 15n * 10n ** 15n,
+    });
+    expect(dripFromEnv("1")).toBe(10n ** 18n);
+    expect(dripFromEnv(" 0.000000000000000001 ")).toBe(1n);
+  });
+
+  it("refuses values it cannot use", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    for (const bad of ["0", "-1", "2.5", "abc", "1001"]) {
+      expect(() => serverFromEnv({ ...env, FAUCET_PER_IP_PER_HOUR: bad })).toThrow(/FAUCET_PER_IP_PER_HOUR/);
+    }
+    for (const bad of ["0", "-0.03", "1.5", "abc", ".03", "0.0000000000000000001", "1e-2", "0,03"]) {
+      expect(() => dripFromEnv(bad), bad).toThrow(/FAUCET_DRIP_BNB/);
+    }
+  });
+});
+
+describe("faucet wallet", () => {
+  // createChain contacts no RPC until a call is made; these tests make none.
+  const RPC = "http://127.0.0.1:9";
+  const REGISTRY = "0xb9ad45dc177c801f10670f2aac03b467f1c367d2";
+  const attesterKey = generatePrivateKey();
+  const faucetKey = generatePrivateKey();
+  const attesterAddress = lower(privateKeyToAccount(attesterKey));
+  const faucetAddress = lower(privateKeyToAccount(faucetKey));
+  afterEach(() => vi.restoreAllMocks());
+
+  it("pays from FAUCET_PRIVATE_KEY when given; the attester key only announces the origin", () => {
+    const chain = createChain(RPC, attesterKey, undefined, { faucetKey, originRegistry: REGISTRY });
+    expect(chain.faucet?.address).toBe(faucetAddress);
+    expect(chain.origin?.sender).toBe(attesterAddress);
+  });
+
+  it("pays from the attester key when no faucet key is given", () => {
+    const chain = createChain(RPC, attesterKey, undefined, { originRegistry: REGISTRY });
+    expect(chain.faucet?.address).toBe(attesterAddress);
+    expect(chain.origin?.sender).toBe(attesterAddress);
+  });
+
+  it("a faucet key alone runs the faucet; nothing is announced without the attester key", () => {
+    const chain = createChain(RPC, undefined, undefined, { faucetKey, originRegistry: REGISTRY });
+    expect(chain.faucet?.address).toBe(faucetAddress);
+    expect(chain.origin).toBeUndefined();
+  });
+
+  it("from the environment: FAUCET_PRIVATE_KEY is the faucet's wallet, and a malformed one is refused without repeating it", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const env = { RPC_URL: RPC, DATA_FILE: "/nonexistent/cypher-run-test.json" } as NodeJS.ProcessEnv;
+    expect(serverFromEnv({ ...env, ATTESTER_PRIVATE_KEY: attesterKey, FAUCET_PRIVATE_KEY: faucetKey.slice(2) }).faucet.wallet).toBe(faucetAddress);
+    expect(serverFromEnv({ ...env, ATTESTER_PRIVATE_KEY: attesterKey }).faucet.wallet).toBe(attesterAddress);
+    expect(serverFromEnv(env).faucet.wallet).toBeNull();
+    try {
+      serverFromEnv({ ...env, FAUCET_PRIVATE_KEY: "0xnot-a-key-0123456789abcdef" });
+      expect.unreachable();
+    } catch (e) {
+      expect(String(e)).toContain("FAUCET_PRIVATE_KEY");
+      expect(String(e)).not.toContain("not-a-key");
+    }
   });
 });

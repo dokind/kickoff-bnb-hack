@@ -2,6 +2,7 @@
   "chainId": 97,
   "checkInLauncherFactory": "0x2A872200B83dD025977d785cDE05356d23eA4153",
   "deployedAt": 144816444,
+  "originRegistry": "0xb9aD45Dc177C801f10670F2aac03B467f1C367d2",
   "portal": "0x000042108465206185A077Edc3F3fd2b49060000",
   "quoteToken": "0x190C989D5665a0e404B444b53CAE9AbCfb600157",
   "streakVaultFactory": "0x0652AAD1d659344f6EdB9572723479aaece144Be"

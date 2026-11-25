@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { launcherAbi, vaultAbi } from "../src/chain.js";
+import { launcherAbi, registryAbi, vaultAbi } from "../src/chain.js";
 
 // The server reads the contracts through hand-written fragments. This checks every fragment against
 // the ABI the contracts folder exports, so a renamed or retyped view cannot go unnoticed.
@@ -41,4 +41,18 @@ describe.skipIf(!exported)("ABI fragments match contracts/abi", () => {
       }
     });
   }
+});
+
+// OriginRegistry is not in contracts/abi; its compiled artifact is checked when `forge build` has run.
+const registryFile = fileURLToPath(new URL("../../contracts/out/OriginRegistry.sol/OriginRegistry.json", import.meta.url));
+
+describe.skipIf(!existsSync(registryFile))("ABI fragment matches the compiled OriginRegistry", () => {
+  it("OriginRegistry: announcer, origin and setOrigin exist with the same types", () => {
+    const full = (JSON.parse(readFileSync(registryFile, "utf8")) as { abi: Fragment[] }).abi.filter((f) => f.type === "function");
+    for (const fragment of registryAbi as readonly Fragment[]) {
+      const match = full.find((f) => f.name === fragment.name);
+      expect(match, `OriginRegistry.${fragment.name} is missing`).toBeDefined();
+      expect(shape(match!), `OriginRegistry.${fragment.name}`).toEqual(shape(fragment));
+    }
+  });
 });

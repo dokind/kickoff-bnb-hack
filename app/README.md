@@ -37,7 +37,8 @@ About, a sheet opened from the Wallet screen.
 Anyone can start a round, so there are several at once. **Home shows every
 round as a card in a slider at the top**, and the card in view is the
 selected round: the streak, the days, the one primary action, the prize and
-the members under it are all about that round.
+THE PRIZE (the members and what their days are worth) under it are all about
+that round.
 
 - **Which rounds.** Every round in the server's public list (`GET /rounds`),
   plus any round this device opened by its link or started itself, listed or
@@ -113,7 +114,7 @@ The app is exactly these, in a centred 480px column on wide screens.
 | Screen | Where | File | What it does |
 |---|---|---|---|
 | Onboarding | `/onboarding` | `lib/screens/onboarding_screen.dart` | Shown once. Step 1: a hero line, one sentence, one button. The wallet is made silently when the button is pressed and the faucet is asked in the background. Step 2: connect Apple Health / Health Connect ("Allow access", "Not now"); in a browser, a note that the check-in there is self-reported |
-| Home | `/` (and `/r/<launcher>`) | `lib/screens/home_screen.dart`, `lib/widgets/round_slider.dart` | At the top the round cards: name, a state chip (Open, Bar full, Launched, Ended), the bar (a tick gauge of `totalCheckIns` of `checkInGoal`), prize so far, members, the deadline, "You're in" for a member, "Unlisted" where it applies, and "Invite". Under the selected card: the streak as the hero numeral ("7 days"), today's state, the last seven days, the prize so far in dot-matrix numerals beside the token pool, the members (address, days, streak) and "How it works". ONE primary action (table below) floats at the bottom on a scrim that is opaque behind it. Reads the rounds again every 20 seconds |
+| Home | `/` (and `/r/<launcher>`) | `lib/screens/home_screen.dart`, `lib/widgets/round_slider.dart` | At the top the round cards: name, a state chip (Open, Bar full, Launched, Ended), the bar (a tick gauge of `totalCheckIns` of `checkInGoal`), prize so far, members, the deadline, "You're in" for a member, "Unlisted" where it applies, and "Invite". Under the selected card: THE PRIZE (`lib/widgets/pot_section.dart`, members shown with a friendly name from `lib/util/names.dart`, arithmetic in `lib/util/pot.dart`: what this wallet would get "if it launched now", what today's check-in does to its share, and every member's days, share of all check-ins and amount, most days first, with "You" always in sight), then, while the token pool is under Flap's floor, one line saying how many more members or a sponsor it needs (`lib/widgets/launch_floor_line.dart`), then the streak (`lib/widgets/streak_block.dart`: days, today's state, the last seven days), the prize so far in dot-matrix numerals beside the token pool, "How it works" and, last, SO FAR (`lib/widgets/so_far_card.dart`: this wallet across its rounds and everyone across every round, from `GET /stats/:address`; left out when the server does not answer it). ONE primary action (table below) floats at the bottom on a scrim that is opaque behind it. Reads the rounds again every 20 seconds |
 | Invite | sheet over Home | `lib/screens/invite_sheet.dart` | The round's link, "Copy link" and a QR code of it. On the device that started the round: the "Unlisted" switch |
 | Join | sheet over Home | `lib/screens/join_sheet.dart` | The round's name over the title. The deposit, its split into prize and token pool (from `liquidityBps`), what happens if the bar fills or does not, then two steps with progress: "Get test dollars" and "Pay deposit". Waits for the faucet's gas first and says "Preparing your wallet" |
 | Check-in | sheet over Home | `lib/screens/checkin_sheet.dart` | The round's name over the title. Phone: today's steps from the health store against the minimum. Browser: a number field labelled "Self-reported, testnet only". Then the transaction link |
@@ -230,8 +231,8 @@ code is used): the same screens, layout, type, spacing, motion and parts.
   1px rim brightest at the top left; 28px corners, 40px on sheets
   (`GlassSurface`, `GlassCard`).
 - **One accent, volt `#D4FF3A`.** Money actions (join, pay, launch, claim),
-  the last tick of a gauge, today in the week strip, "You" in the members
-  list, the selected tab.
+  the last tick of a gauge, today in the week strip, "You" in THE PRIZE (the
+  only row in the accent), the selected tab.
 - **Type.** Headlines are Barlow Condensed ExtraBold Italic in capitals
   ("RUN THE STAKES."), titles Barlow Condensed SemiBold, figures light
   tabular Barlow, labels small tracked capitals. Money is set in dot-matrix
@@ -272,7 +273,10 @@ lib/
     tab_bar.dart, main_tabs.dart   the floating tab bar
     common.dart             the centred column, the banner, sheets, the bottom scrim, ErrorRetry, LinkRow
     brand.dart              "Built on Flap" and the logo slot
+    pot_section.dart        THE PRIZE on Home: the projection, the nudge, the members compared (ShareTicks is its bar)
+    so_far_card.dart        SO FAR on Home: this wallet and everyone, in plain counts
   util/format.dart          amounts, dates, UTC days, friendlyError
+  util/pot.dart             the prize share arithmetic: the vault's rule (amount * days / total, rounded down), shares, which rows are shown
 assets/brand/               Flap's official logo and its usage notes
 web/                        web shell (index.html, manifest, icons)
 test/
@@ -281,7 +285,9 @@ test/
   rounds_test.dart          the /rounds calls, the pinned registration text and signatures, invite link text, the slider's order, selection and what is remembered, rounds opened by link, starting and listing a round, the fallback to a single-round server
   slider_test.dart          the cards and dots, moving on every 5 seconds until a touch (fake timers), reduced motion, the invite sheet and its QR, the scrim and the room under the content
   safe_action_test.dart     the action is for the round it names: no moving on after the first touch, with a sheet or dialog open, from a round link or with reduced motion; the round's name on the action (and cut short when long) and over the sheets' titles; a sheet keeps its round when the selection changes behind it
-  home_test.dart            a widget test for each Home state, plus the bar, prize, members, no round, unreachable
+  home_test.dart            a widget test for each Home state, plus the bar, prize, shares, no round, unreachable
+  pot_test.dart             the prize share arithmetic (one member, no check-ins, zero days, uneven days, cents never above the prize) and THE PRIZE in each state: member, checked in, not joined, launched, ended, loading, error, fifty members, 320 wide with large text
+  so_far_test.dart          SO FAR: the figures as they are, what is left out, where they come from, last on Home
   flow_test.dart            join sheet steps, check-in on web and phone, onboarding and routing, /r/<launcher> with and without a wallet, result, Wallet and its sheets, the "+" and "Add a round", the new-round screen (the deal, the "Unlisted" switch, the registration call, the done state)
   design_test.dart          formats, dot-matrix font, gauges, aurora, pills, banner, banned words
   wallet_key_test.dart      the key is always 64 hex characters
@@ -366,7 +372,8 @@ What the app calls (`lib/services/verifier_api.dart`; the tests in
 | `GET /rounds` | the public list: `{rounds: [...]}`, each entry with `launcher`, `name`, `deposit`, `liquidityBps`, `checkInGoal`, `totalCheckIns`, `memberCount`, `prizeNow`, `poolQuoteNow`, `deadline`, `launched`, `token`, `vault`, `state` and `featured`. Amounts are read as decimal strings in whole units ("1000", "356.2"); a whole number of 16 digits or more is taken as base units. The app orders the cards itself and works out open / launched / ended from `launched` and `deadline` |
 | `GET /rounds/:launcher` | one round in full, listed or not, with `minSteps` and `unlisted`. Asked for the selected round and for every round this device knows that the list leaves out. 404 `{error: "no_round"}` means our factory did not create it |
 | `GET /rounds/:launcher/me/:address` | `streak`, `bestStreak`, `days`, and stand-ins for membership, days and the share when the chain cannot be read. Addresses are sent in lower case |
-| `GET /rounds/:launcher/members` | the members list, a plain JSON array (an object with `members` is also read) |
+| `GET /rounds/:launcher/members` | the members list, a plain JSON array (an object with `members` is also read). THE PRIZE is drawn from it: one call per round, no chain read per member from the phone |
+| `GET /stats/:address` | SO FAR: `people`, `checkIns`, `deposited`, `launched` across every round our factory created, `complete`, and `you` (`rounds`, `days`, `claimed`) for this wallet. 404 (a server from before it) means no card; an answer with `complete: false` does not replace whole totals |
 | `POST /rounds/:launcher/checkin` | `{address, steps, source, signature}`. `source` is `healthkit`, `healthconnect` or `self`. `signature` is personal_sign of `Cypher Run checkin <launcher> <YYYY-MM-DD> <steps>` with the launcher in lower case and the day in UTC. The answer is `{day, dayIndex, attesterSignature}` |
 | `POST /rounds` | `{launcher, unlisted, signature}` with personal_sign of `Cypher Run round <launcher> <listed|unlisted>` (launcher in lower case) by the wallet that created the round. The answer is `{launcher, unlisted}`. Sent after "Start round" and when the creator flips the switch in the invite sheet |
 | `POST /faucet` | `{address, signature}` with personal_sign of `Cypher Run faucet <address>`, address in lower case. Gas only |
@@ -444,7 +451,7 @@ starts in" hint are in UTC days. In Bangkok the day turns at 07:00.
   field of a list entry equalled the same round read in full. The hosted
   web build, opened at `/#/r/<launcher>` at phone width, showed "3 rounds",
   the linked round's card, the cards moving by themselves and the Invite
-  sheet ([../HOSTING.md](../HOSTING.md)); that was the build before "The
+  sheet (the hosting notes are private); that was the build before "The
   action is for the round it names", and a build since then stays on the
   linked round. Not checked: `POST /rounds` with a
   round creator's key against that server (only a refusal, 401, for a wallet

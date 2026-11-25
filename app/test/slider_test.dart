@@ -85,7 +85,13 @@ void main() {
       expect(find.text('Open'), findsOneWidget);
       expect(find.text('2 / 6 check-ins'), findsOneWidget);
       expect(find.text('Prize so far 2,100 USD'), findsOneWidget);
-      expect(find.text('3 members'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(RoundCard),
+          matching: find.text('3 members'),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('Closes 2 Dec 2026'), findsOneWidget);
       expect(find.text('You\'re in'), findsNothing);
       // Still nothing after a long while.
@@ -135,8 +141,25 @@ void main() {
       expect(find.text('You\'re in'), findsOneWidget);
       expect(find.text('5 / 6 check-ins'), findsOneWidget);
       expect(find.text('Prize so far 2,800 USD'), findsOneWidget);
-      expect(find.text('4 members'), findsOneWidget);
-      // The streak, the days and the one action are that round's.
+      expect(
+        find.descendant(
+          of: find.byType(RoundCard),
+          matching: find.text('4 members'),
+        ),
+        findsOneWidget,
+      );
+      // The streak, the days and the one action are that round's. The days
+      // are further down Home, under the prize.
+      await tester.scrollUntilVisible(
+        find.text('2 days in this round'),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('home-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       expect(find.text('2 days in this round'), findsOneWidget);
       expect(action('Check in · Lumpini Striders'), findsOneWidget);
       expect(action('Join Morning Movers · 1,000 USD'), findsNothing);
@@ -342,6 +365,128 @@ void main() {
       expect(moves.last, (1, true));
       await wait(tester, const Duration(seconds: 60));
       expect(moves, hasLength(3));
+    });
+  });
+
+  group('stopping for good', () {
+    /// The slider alone, on a page that scrolls, with motion on.
+    Future<(List<(int, bool)>, List<int>)> pumpAlone(
+      WidgetTester tester,
+    ) async {
+      usePhone(tester);
+      final rounds = [
+        for (final j in [roundJson(), roundJson(at: launcherB, name: 'B')])
+          Round.fromJson(j),
+      ];
+      var index = 0;
+      final moves = <(int, bool)>[];
+      final stopped = <int>[];
+      await tester.pumpWidget(
+        inMotion(
+          ListView(
+            key: const Key('page'),
+            children: [
+              StatefulBuilder(
+                builder: (context, setState) => RoundSlider(
+                  cards: [
+                    for (final r in rounds)
+                      RoundCardInfo(
+                        round: r,
+                        totalCheckIns: r.totalCheckIns,
+                        launched: false,
+                        joined: false,
+                      ),
+                  ],
+                  index: index,
+                  now: fixedNow,
+                  interval: const Duration(seconds: 2),
+                  hold: const Duration(seconds: 7),
+                  onInvite: (_) {},
+                  onStopped: () => stopped.add(index),
+                  onSelect: (i, {required byPerson}) {
+                    moves.add((i, byPerson));
+                    setState(() => index = i);
+                  },
+                ),
+              ),
+              const SizedBox(height: 2000),
+            ],
+          ),
+        ),
+      );
+      return (moves, stopped);
+    }
+
+    testWidgets('anything opened over the page, however it was opened', (
+      tester,
+    ) async {
+      final (moves, stopped) = await pumpAlone(tester);
+      await wait(tester, const Duration(seconds: 2));
+      expect(moves, [(1, false)]);
+
+      // A sheet opened by the app, with no touch anywhere.
+      final context = tester.element(find.byType(RoundSlider));
+      showAppSheet<void>(
+        context,
+        builder: (_) => const SheetFrame(tall: false, child: Text('A sheet')),
+      );
+      await settle(tester, 14);
+      expect(find.text('A sheet'), findsOneWidget);
+      expect(slider(tester).waiting, isFalse);
+      expect(stopped, [1], reason: 'told once');
+      Navigator.of(context).pop();
+      await settle(tester, 14);
+
+      // Closed again: the cards stay on the card that was in view.
+      await wait(tester, const Duration(seconds: 60));
+      expect(moves, [(1, false)]);
+      expect(slider(tester).waiting, isFalse);
+      expect(stopped, [1]);
+    });
+
+    testWidgets('a scroll of the page that is no touch (keys, a scroll bar)', (
+      tester,
+    ) async {
+      final (moves, stopped) = await pumpAlone(tester);
+      expect(slider(tester).waiting, isTrue);
+      final page = tester.state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byKey(const Key('page')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      // What the keyboard's Page Down does: an animated scroll.
+      page.position.animateTo(
+        120,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.linear,
+      );
+      await settle(tester, 8);
+      page.position.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.linear,
+      );
+      await settle(tester, 8);
+      expect(stopped, [0]);
+      expect(slider(tester).waiting, isFalse);
+      await wait(tester, const Duration(seconds: 60));
+      expect(moves, isEmpty);
+    });
+
+    testWidgets('a touch tells it once too', (tester) async {
+      final (moves, stopped) = await pumpAlone(tester);
+      await tester.drag(find.byType(PageView), const Offset(-300, 0));
+      await settle(tester, 14);
+      expect(moves, [(1, true)]);
+      expect(stopped, hasLength(1));
+      await tester.drag(find.byType(PageView), const Offset(300, 0));
+      await settle(tester, 14);
+      await wait(tester, const Duration(seconds: 60));
+      expect(stopped, hasLength(1));
+      expect(moves, [(1, true), (0, true)]);
     });
   });
 

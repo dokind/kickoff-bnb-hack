@@ -57,15 +57,18 @@ class NewRoundScreen extends StatefulWidget {
   ///   - whatever the split, half the token supply and 80% of the trading
   ///     tax go to the round's vault and are shared by days checked in
   ///     ("most of": the deal has no percentages);
-  ///   - anyone can launch once the round has [goal] check-ins;
+  ///   - `launch()` needs [goal] check-ins, and Flap's Portal will not open
+  ///     a pool under its floor ([AppConfig.launchPoolFloor]): both, said
+  ///     on one line, then who may launch (anyone);
   ///   - after the deadline with no launch, every deposit can be taken back.
+  /// Amounts are test USD.
   static List<String> dealLines({
     required int deposit,
     required int bps,
     required int goal,
     required int daysOpen,
   }) {
-    const usd = AppConfig.quoteSymbol;
+    const usd = testUsd;
     final toPool = deposit * bps ~/ 10000;
     final toPrize = deposit - toPool;
     return [
@@ -78,19 +81,43 @@ class NewRoundScreen extends StatefulWidget {
         'Prize: none. The whole deposit goes to the token pool.',
       'Token: half the supply and most of the trading tax, shared by days '
           'shown up.',
-      'Launch: once the group has ${formatCount(goal)} check-ins, anyone '
-          'can launch the token.',
+      'Launch needs both: ${formatCount(goal)} check-ins and '
+          '${formatCount(AppConfig.launchPoolFloor)} $usd in the token pool.',
+      'Who launches: anyone, once both are there.',
       'No launch in ${days(daysOpen)}: every deposit goes back.',
     ];
   }
 
-  /// The quiet line under the deal: what Flap needs before it opens a pool.
+  /// The quiet line under the deal: who fills Flap's pool floor.
   static String floorLine({required int deposit, required int bps}) {
     final n = membersForFloor(deposit: deposit, bps: bps);
     final people = n == 1 ? '1 person' : '${formatCount(n)} people';
-    return 'Flap needs ${formatCount(AppConfig.launchPoolFloor)} '
-        '${AppConfig.quoteSymbol} in the pool to launch: $people at this '
-        'deposit, or a sponsor.';
+    return 'Flap sets that pool floor. At this deposit it takes $people, or '
+        'a sponsor.';
+  }
+
+  /// The fewest people the hint under the goal counts on.
+  static const int hintPeople = 5;
+
+  /// The hint under the goal, worked out from the choices: how long the bar
+  /// takes to fill if everyone needed checks in every day. "Everyone
+  /// needed" is the members it takes to fill the pool floor at this
+  /// deposit, and never fewer than [hintPeople]. One check-in per person per
+  /// day, so it is the goal over the people, rounded up. A projection, and
+  /// said as one.
+  static String fillHint({
+    required int deposit,
+    required int bps,
+    required int goal,
+    required int daysOpen,
+  }) {
+    final floor = membersForFloor(deposit: deposit, bps: bps);
+    final people = floor > hintPeople ? floor : hintPeople;
+    final d = (goal / people).ceil();
+    final line =
+        'With ${formatCount(people)} people checking in daily, this fills in '
+        'about ${days(d)}';
+    return d > daysOpen ? '$line, longer than the round runs.' : '$line.';
   }
 
   @override
@@ -484,16 +511,32 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
                 helper:
                     'Check-ins the group needs to launch the token. One per '
                     'person per day.',
-                child: ChipPicker<int>(
-                  key: const Key('round-goal'),
-                  options: NewRoundScreen.goalOptions,
-                  selection: _goal,
-                  label: (v) => '$v',
-                  semanticLabel: (v) => '$v check-ins',
-                  height: Sizes.touch,
-                  minWidth: 56,
-                  wrap: true,
-                  onChanged: (v) => setState(() => _goal = v),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ChipPicker<int>(
+                      key: const Key('round-goal'),
+                      options: NewRoundScreen.goalOptions,
+                      selection: _goal,
+                      label: (v) => '$v',
+                      semanticLabel: (v) => '$v check-ins',
+                      height: Sizes.touch,
+                      minWidth: 56,
+                      wrap: true,
+                      onChanged: (v) => setState(() => _goal = v),
+                    ),
+                    const SizedBox(height: Space.s2),
+                    Text(
+                      NewRoundScreen.fillHint(
+                        deposit: _deposit,
+                        bps: _bps,
+                        goal: _goal,
+                        daysOpen: _daysOpen,
+                      ),
+                      key: const Key('round-goal-hint'),
+                      style: t.body(13).copyWith(color: c.text2),
+                    ),
+                  ],
                 ),
               ),
               _field(

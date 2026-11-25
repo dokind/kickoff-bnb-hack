@@ -114,6 +114,12 @@ class _RoundView {
   ShareChain? share;
   Me? me;
   List<Member> members = const [];
+
+  /// The members list was answered at least once (it may be empty).
+  bool membersRead = false;
+
+  /// One sentence when the last try to read the members failed.
+  String? membersError;
   DateTime? readAt;
 }
 
@@ -245,6 +251,17 @@ class AppState extends ChangeNotifier {
   Me? get me => _view?.me;
   List<Member> get members => _view?.members ?? const [];
 
+  /// The selected round's members list has been answered (it may be
+  /// empty). False while it is read for the first time.
+  bool get membersRead => _view?.membersRead ?? false;
+
+  /// One sentence when the members list could not be read.
+  String? get membersError => _view?.membersError;
+
+  /// Totals across every round, and this wallet's own. Null until read, and
+  /// with a server that does not keep them.
+  Stats? stats;
+
   /// Where [selected] sits in [rounds]; 0 when there is none.
   int get selectedIndex {
     final i = rounds.indexWhere((r) => r.id == selected);
@@ -327,6 +344,17 @@ class AppState extends ChangeNotifier {
 
   bool get isMember =>
       onChain?.isMember ?? me?.member ?? joined.contains(selected);
+
+  /// This wallet's days and today's check-in in the selected round have
+  /// been read, from the chain or from the server. Until then [daysOf] and
+  /// [checkedInToday] say 0 and false only because nothing is known yet,
+  /// and [isMember] may come from what was known before.
+  bool get yourDaysKnown => onChain != null || me != null;
+
+  /// The selected round has been read at least once, whatever came back.
+  /// With [yourDaysKnown] still false after it, neither the chain nor the
+  /// server answered for this wallet.
+  bool get selectedReadOnce => _view?.readAt != null;
 
   /// Days this wallet has checked in.
   int get daysOf => daysIn(selected);
@@ -475,6 +503,7 @@ class AppState extends ChangeNotifier {
     usd = BigInt.zero;
     _views.clear();
     joined.clear();
+    stats = null;
     _pending = null;
     await store.savePending(null);
     notifyListeners();
@@ -646,7 +675,28 @@ class AppState extends ChangeNotifier {
     await Future.wait([if (id != null) _readSelected(id), refreshBalances()]);
     loading = false;
     notifyListeners();
+    // The totals last: after a join or a check-in the server has then
+    // already seen this wallet in the round (its GET /me), so the totals do
+    // not lag behind what the round itself says. The server adds up every
+    // round for them, so they are waited for only [statsGrace]: a slow
+    // answer must not hold up an action's "Confirming…" or pull-to-refresh.
+    // It still lands on its own when it comes.
+    var waiting = true;
+    final stats = _readStats().then((_) {
+      if (!waiting) notifyListeners();
+    });
+    try {
+      await stats.timeout(statsGrace);
+    } on TimeoutException {
+      // Shown when it comes.
+    }
+    waiting = false;
+    notifyListeners();
   }
+
+  /// How long [refresh] waits for the totals before it returns without
+  /// them.
+  static const statsGrace = Duration(seconds: 2);
 
   Future<void> _readRounds() async {
     final wanted = _linked;
@@ -849,11 +899,46 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _readMembers(Round r, _RoundView view) async {
-    if (!_serverKnows(r)) return;
+    if (!_serverKnows(r)) {
+      // No list to ask for: an empty one, not one that is still loading.
+      view.membersRead = true;
+      return;
+    }
     try {
       view.members = await api.members(
         launcher: legacyServer ? null : r.launcher,
       );
+      view
+        ..membersRead = true
+        ..membersError = null;
+    } catch (e) {
+      // The list read before, if any, stays.
+      view.membersError = friendlyError(e);
+    }
+  }
+
+  /// The totals across every round. Never throws: what was read before
+  /// stays, and totals the server could only read in part are not shown in
+  /// place of whole ones.
+  Future<void> _readStats() async {
+    if (legacyServer) return;
+    final who = address;
+    try {
+      final read = await api.stats(who);
+      if (read == null || !read.complete || !hasWallet || address != who) {
+        return;
+      }
+      // The wallet's own numbers are kept when this answer left them out.
+      stats = read.you == null && stats?.you != null
+          ? Stats(
+              people: read.people,
+              checkIns: read.checkIns,
+              deposited: read.deposited,
+              launched: read.launched,
+              complete: read.complete,
+              you: stats!.you,
+            )
+          : read;
     } catch (_) {}
   }
 

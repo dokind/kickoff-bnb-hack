@@ -1,5 +1,11 @@
-# Pacepact hosting. Everything here belongs to the compose project "pacepact" and lives in
+# Cypher Run hosting. Everything here belongs to the compose project "pacepact" (the name the server
+# was first set up under; renaming the project would leave the data volume behind) and lives in
 # /opt/pacepact. It binds no host ports and joins no other project's network.
+#
+# The quick tunnel's host changes whenever the tunnel restarts. The verifier reads the current host
+# from the tunnel's metrics server (http://tunnel:20241/quicktunnel) and writes it to the
+# OriginRegistry on BSC testnet when it changes; the apps read it from there. The web app itself
+# is served from GitHub Pages.
 name: pacepact
 
 services:
@@ -7,6 +13,10 @@ services:
     build: ./verifier
     image: pacepact-verifier:latest
     env_file: ./verifier.env
+    environment:
+      # Overrides verifier.env. The verifier announces its host here (sent from the attester key).
+      ORIGIN_REGISTRY: "0xb9aD45Dc177C801f10670F2aac03B467f1C367d2"
+      ORIGIN_SOURCE_URL: http://tunnel:20241/quicktunnel
     volumes:
       - data:/data
     networks: [inner, egress]
@@ -31,7 +41,9 @@ services:
 
   tunnel:
     image: cloudflare/cloudflared:2026.9.3
-    command: tunnel --no-autoupdate --url http://caddy:80
+    # --metrics on all interfaces of this container, so the verifier can ask /quicktunnel for the
+    # current host. No port is published: only containers on the same networks reach it.
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:20241 --url http://caddy:80
     networks: [inner, egress]
     depends_on: [caddy]
     restart: unless-stopped

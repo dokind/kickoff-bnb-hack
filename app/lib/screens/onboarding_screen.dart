@@ -7,12 +7,15 @@ import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
 
-/// Shown once, before anything else. Two steps:
-///   1. what this is: a hero line, one sentence, one button;
-///   2. connect Apple Health / Health Connect (in a browser: a note that the
-///      check-in there is self-reported).
-/// The wallet is made between the two with nothing shown, and the faucet is
-/// asked for gas in the background.
+/// Shown once, before anything else.
+///   1. What this is: a hero line, one concrete example, one button.
+///   2. On a phone with a health store only: connect Apple Health / Health
+///      Connect, the one permission the app needs.
+/// The wallet is made after the first step with nothing shown, and the
+/// faucet is asked for gas in the background. Where there is no health
+/// store to connect (a browser) the second step would only be caveats, so
+/// it is skipped: they are said in the check-in sheet, where the steps are
+/// typed.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key, required this.state});
   final AppState state;
@@ -30,6 +33,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     try {
       await widget.state.createWallet();
       if (!mounted) return;
+      // Nothing to ask for: straight on to Home.
+      if (!widget.state.health.available) {
+        await widget.state.completeOnboarding();
+        return;
+      }
       setAuroraTone(AuroraPalette.steel);
       setState(() => _step = 1);
     } catch (e) {
@@ -74,7 +82,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           : _HealthStep(
               key: const ValueKey(1),
               busy: _busy,
-              available: widget.state.health.available,
               onAllow: () => _finish(ask: true),
               onSkip: () => _finish(ask: false),
             ),
@@ -189,8 +196,8 @@ class _WelcomeState extends State<_Welcome>
             FadeTransition(
               opacity: shown,
               child: Text(
-                'Pay a deposit, check in every day you move, and share the '
-                'prize and a new token with everyone who showed up.',
+                'Put in 500. Show up each day. Split the prize with everyone '
+                'who did.',
                 style: t.body(16).copyWith(color: c.text2),
               ),
             ),
@@ -217,19 +224,16 @@ class _WelcomeState extends State<_Welcome>
   }
 }
 
+/// Connect the phone's health store. Only shown where there is one.
 class _HealthStep extends StatefulWidget {
   const _HealthStep({
     super.key,
     required this.busy,
-    required this.available,
     required this.onAllow,
     required this.onSkip,
   });
 
   final bool busy;
-
-  /// There is a health store to read (a phone build).
-  final bool available;
   final VoidCallback onAllow;
   final VoidCallback onSkip;
 
@@ -266,7 +270,6 @@ class _HealthStepState extends State<_HealthStep>
     final c = context.colors;
     final ios = defaultTargetPlatform == TargetPlatform.iOS;
     final store = ios ? 'Apple Health' : 'Health Connect';
-    final phone = widget.available;
     return _FillScroll(
       children: [
         const Spacer(),
@@ -306,9 +309,7 @@ class _HealthStepState extends State<_HealthStep>
                     width: 100,
                     height: 100,
                     child: Icon(
-                      phone
-                          ? Icons.monitor_heart_rounded
-                          : Icons.edit_note_rounded,
+                      Icons.monitor_heart_rounded,
                       size: 46,
                       color: c.text,
                     ),
@@ -325,49 +326,29 @@ class _HealthStepState extends State<_HealthStep>
           child: Semantics(
             header: true,
             child: Text(
-              phone
-                  ? 'CONNECT\n${store.toUpperCase()}'
-                  : 'CHECK IN\nIN THE BROWSER',
+              'CONNECT\n${store.toUpperCase()}',
               style: t.display(54),
             ),
           ),
         ),
         const SizedBox(height: 10),
         Text(
-          phone
-              ? 'Your steps are how you check in. ${AppConfig.productName} '
-                    'reads today\'s count each time you check in.'
-              : 'A browser cannot read health data, so the check-in here is '
-                    'a step count you type yourself: self-reported, for the '
-                    'testnet demo.',
+          'Your steps are how you check in. ${AppConfig.productName} reads '
+          'today\'s count each time you check in.',
           style: t.body(16).copyWith(color: c.text2),
         ),
         const SizedBox(height: Space.s6),
-        if (phone) ...[
-          const _PermissionRow(
-            icon: Icons.directions_walk_rounded,
-            title: 'Steps today',
-            detail: 'Recorded by a device. Typed entries are left out.',
-          ),
-          const SizedBox(height: 10),
-          const _PermissionRow(
-            icon: Icons.visibility_outlined,
-            title: 'Read only',
-            detail: 'Nothing is ever written to your health data.',
-          ),
-        ] else ...[
-          const _PermissionRow(
-            icon: Icons.edit_outlined,
-            title: 'You type today\'s steps',
-            detail: 'Self-reported, testnet only.',
-          ),
-          const SizedBox(height: 10),
-          const _PermissionRow(
-            icon: Icons.phone_iphone_rounded,
-            title: 'On the phone app',
-            detail: 'Steps come from Apple Health or Health Connect.',
-          ),
-        ],
+        const _PermissionRow(
+          icon: Icons.directions_walk_rounded,
+          title: 'Steps today',
+          detail: 'Recorded by a device. Typed entries are left out.',
+        ),
+        const SizedBox(height: 10),
+        const _PermissionRow(
+          icon: Icons.visibility_outlined,
+          title: 'Read only',
+          detail: 'Nothing is ever written to your health data.',
+        ),
         const SizedBox(height: 10),
         const _PermissionRow(
           icon: Icons.verified_user_outlined,
@@ -390,21 +371,20 @@ class _HealthStepState extends State<_HealthStep>
         ),
         const SizedBox(height: Space.s5),
         PillButton(
-          label: phone ? 'Allow access' : 'Continue',
-          icon: phone ? Icons.favorite_rounded : null,
+          label: 'Allow access',
+          icon: Icons.favorite_rounded,
           busy: widget.busy,
-          onPressed: phone ? widget.onAllow : widget.onSkip,
+          onPressed: widget.onAllow,
         ),
-        if (phone)
-          Center(
-            child: TextButton(
-              onPressed: widget.busy ? null : widget.onSkip,
-              child: Text(
-                'Not now',
-                style: t.body(14, FontWeight.w500).copyWith(color: c.text2),
-              ),
+        Center(
+          child: TextButton(
+            onPressed: widget.busy ? null : widget.onSkip,
+            child: Text(
+              'Not now',
+              style: t.body(14, FontWeight.w500).copyWith(color: c.text2),
             ),
           ),
+        ),
         const SizedBox(height: Space.s2),
       ],
     );

@@ -4,7 +4,7 @@ The server side of Cypher Run: a discipline app with money on it. You pay a depo
 join and check in every day you move. Everyone's check-ins fill one bar. When it is full, a token
 launches on Flap, and the deposits and the token are shared by how many days each person showed up.
 
-This server does five things (a round is one `CheckInLauncher`):
+This server does six things (a round is one `CheckInLauncher`):
 
 - **Finds the rounds.** Every round created through our `CheckInLauncherFactory` is found in the
   factory's creation events on chain. `GET /rounds` is the app's public list of them; see "Rounds:
@@ -15,7 +15,11 @@ This server does five things (a round is one `CheckInLauncher`):
 - **Remembers the accepted days**, for streaks, per round.
 - **Relays what the chain says** about a round and about one wallet, so the app needs one request
   instead of many reads.
-- **Runs a gas faucet** that sends a new wallet 0.03 test BNB once (off by default).
+- **Runs a gas faucet** that sends a new wallet a little test BNB once (0.03 by default; off by
+  default).
+- **Announces where it can be reached.** With `ORIGIN_REGISTRY` set it writes its current public
+  host to the `OriginRegistry` contract whenever that host changes, and the apps read it from there;
+  see "Origin announcer".
 
 Every route about a round exists twice: `/rounds/:launcher/...` names the round, and the older
 `/round`, `/me/:address`, `/members` and `/checkin` are the same routes for the **featured round**,
@@ -39,33 +43,46 @@ and the limits; it cannot check that the steps were walked. A modified client ca
 within the limits. Typed-in reports are stored flagged as self-reported, but they count the same on
 chain.
 
-What whoever runs this server and holds the attester key **can** do:
+### Trust
 
-- sign a check-in for a member without a real report, or refuse to sign for a member who moved.
-  Since the prize and the reserved tokens are shared by days checked in, that changes shares. This
-  is the one thing members rely on the operator for.
+The attester key is bounded as follows; each point is checked against
+`../contracts/src/CheckInLauncher.sol`, `../contracts/src/StreakVault.sol` and `src/app.ts`.
 
-What it **cannot** do, because the contracts do not allow it:
+- **What it can do.** Sign, or refuse to sign, a check-in for a wallet. This server signs for
+  today (UTC) only, and only for a wallet that is a member of the round (`isMember`). On chain,
+  `checkIn(day, signature)` accepts a signature only for the current UTC day or the one before it,
+  once per wallet per day, only from a wallet that joined (paid the deposit), only before the launch
+  and the deadline, and the wallet itself sends the transaction (`msg.sender` is the member). Since
+  the prize, half the token supply and 80% of the trading tax are shared by days shown up
+  (`daysOf / totalCheckIns`), signing for a member who did not move, or refusing one who did, changes
+  shares. That is the one thing members rely on the operator for.
+- **It cannot move funds.** No function of the Launcher or the vault pays out to the attester or
+  lets any address withdraw. Test USD leaves the Launcher only to the Flap pool and the vault at
+  `launch()`, or back to the wallet that paid it in through `refund()`; the vault pays only through
+  `claim()`.
+- **It cannot launch early.** `launch()` reverts until `totalCheckIns >= checkInGoal`, and every
+  check-in is a transaction from a member's own wallet. The attester has no launch function of its
+  own.
+- **It cannot block a launch.** Once the bar is full, `launch()` is open to any wallet until the
+  deadline. If the attester stops signing, the bar may never fill, and then every member takes the
+  full deposit back with `refund()` after the deadline.
+- **It cannot pay anyone who did not deposit.** `daysOf` only grows through `checkIn`, which
+  requires `isMember`, which only `join()` sets, and `join()` takes the deposit. `claim()` pays by
+  `daysOf`. Sponsors, the creator and the attester receive nothing from the prize, the tokens or the
+  tax in those roles; a refund returns to each wallet only what it paid in.
 
-- launch early: `launch()` needs the bar to be full, and anyone may call it then;
-- block a launch: once the bar is full, any wallet can call `launch()` before the deadline;
-- choose who is paid in any way other than by signing or not signing daily check-ins: there is no
-  list of winners to post and no settle step; `StreakVault.claim()` pays by `daysOf / totalCheckIns`;
-- record a check-in for a wallet that has not joined, for a day other than today or yesterday, or
-  twice for one day;
-- move, withdraw or redirect funds: no address, including the attester, the creator and a sponsor,
-  can take anything out of the Launcher or the vault other than through `refund()` and `claim()`;
-- stop refunds: if the round has not launched by its deadline, each member takes the full deposit
-  back and each sponsor their contribution.
+The same key also writes the `OriginRegistry` (see "Origin announcer"). That value only tells the
+apps which host to send requests to; it holds no funds, and no round reads it.
 
 Other things to know:
 
 - **This server sends no transaction to the round's contracts.** Members send `join`, `checkIn`,
   `launch`, `refund` and `claim` from their own wallets. If this server is down, nobody can get a
   new check-in signed; everything else keeps working on chain.
-- **The faucet spends the attester's wallet.** With `FAUCET_ENABLED=true` the server sends test BNB
-  from the attester address to wallets that ask. It is limited (see `POST /faucet`) and it is the
-  same key, so run it with test funds only.
+- **The faucet's wallet.** With `FAUCET_ENABLED=true` the server sends test BNB to wallets that ask.
+  It pays from `FAUCET_PRIVATE_KEY` when that is set, so the attester key then only signs check-ins
+  and sends `setOrigin`; otherwise it pays from the attester's wallet. It is limited (see
+  `POST /faucet`); run it with test funds only.
 - **Streaks and the member list are this server's own records.** They are for display. Shares are
   decided by `daysOf` on chain, which the app can read directly.
 - Addresses and the days each one checked in are readable by anyone through `GET /me` and
@@ -96,13 +113,16 @@ against the real contracts").
 | `PORT` | Port to listen on, default 8787. |
 | `RPC_URL` | BSC testnet RPC. Required. |
 | `CHAIN_ID` | `97` or unset. Anything else stops the server at start. |
-| `ATTESTER_PRIVATE_KEY` | The key that signs check-ins and pays the faucet. It must be the key of the address the round was created with as `attester`. Without it the read routes work, `POST /checkin` answers `503 attester_disabled` and the faucet is off. Never commit it. `VERIFIER_PRIVATE_KEY`, the earlier name for the same key, is read when this one is not set. |
+| `ATTESTER_PRIVATE_KEY` | The key that signs check-ins and sends `setOrigin`. It must be the key of the address the round was created with as `attester`, and the `OriginRegistry`'s announcer. Its wallet also pays the faucet unless `FAUCET_PRIVATE_KEY` is set. Without it the read routes work, `POST /checkin` answers `503 attester_disabled` and nothing is announced. Never commit it. `VERIFIER_PRIVATE_KEY`, the earlier name for the same key, is read when this one is not set. |
 | `CURRENT_LAUNCHER` | Address of the featured round's `CheckInLauncher`: the one `/round`, `/me`, `/members` and `/checkin` serve, and the first in `GET /rounds`. Empty: no featured round until `POST /admin/round` sets one. A round set through that route is stored in `DATA_FILE` and wins over this variable from then on. |
 | `CURRENT_ROUND_NAME` | Optional display name for `CURRENT_LAUNCHER`. Default: the name stored in the Launcher. |
 | `ADMIN_TOKEN` | Shared secret for `POST /admin/round`. Without it that route answers `503 admin_disabled`. |
 | `MIN_STEPS` | Steps needed for a check-in, default `1000` (1 to 80000). |
 | `ALLOW_SELF_REPORTED` | `true` also accepts `source: "self"` (a typed-in count). For the testnet demo on the web. Default off. |
-| `FAUCET_ENABLED` | `true` switches `POST /faucet` on. Needs `ATTESTER_PRIVATE_KEY`. Default off. |
+| `FAUCET_ENABLED` | `true` switches `POST /faucet` on. Needs `FAUCET_PRIVATE_KEY` or `ATTESTER_PRIVATE_KEY`. Default off. |
+| `FAUCET_PER_IP_PER_HOUR` | Wallets one network address may get funded in any hour, default `5` (1 to 1000). A room of people on one Wi-Fi shares one address; raise it for an event. |
+| `FAUCET_DRIP_BNB` | Test BNB sent per wallet, as a decimal, default `0.03` (above 0, at most 1). |
+| `FAUCET_PRIVATE_KEY` | Optional. A separate key the faucet pays from, with its own transaction queue. When set, the attester key only signs check-ins and sends `setOrigin`. Fund this wallet with test BNB. Never commit it. |
 | `TRUST_PROXY` | `true` when a reverse proxy sits in front: the faucet's per-IP limit then uses the last address in `X-Forwarded-For`. Leave it off when clients reach this server directly, or the header could be forged. |
 | `FLAP_TOKEN_URL` | Optional. Address of a token's page on Flap with `{token}` in it. Used for `flapUrl` in `GET /round` after the launch. Unset: `flapUrl` is always `null`. |
 | `DATA_FILE` | JSON file for storage, default `./data/store.json` (`/data/store.json` in the Docker image). |
@@ -110,8 +130,12 @@ against the real contracts").
 | `FACTORY_FROM_BLOCK` | The block that factory was deployed in; the scan for rounds starts there. Default `144816444`. |
 | `LOG_CHUNK_BLOCKS` | Blocks asked for in one `eth_getLogs` call, default `10000`. A range the RPC refuses is halved and asked again, so a value that is too high only costs a few extra calls. |
 | `ROUNDS_REFRESH_SECONDS` | How often the server looks for newly created rounds, default `10` (2 to 3600). |
+| `ORIGIN_REGISTRY` | Address of the `OriginRegistry` to announce this server's host to. Unset: nothing is announced. On BSC testnet: `0xb9aD45Dc177C801f10670F2aac03B467f1C367d2`. Needs `ATTESTER_PRIVATE_KEY`. |
+| `ORIGIN_HOST` | The public host, when it is fixed: a plain hostname such as `api.example.com` (no scheme, port or path; anything else stops the server at start). Unset: the host is read from `ORIGIN_SOURCE_URL`. |
+| `ORIGIN_SOURCE_URL` | Where the host is read when `ORIGIN_HOST` is not set, default `http://tunnel:20241/quicktunnel` (cloudflared's metrics server, which answers `{"hostname":"<name>.trycloudflare.com"}`). |
+| `ORIGIN_CHECK_SECONDS` | How often the host is checked, default `60` (10 to 3600). |
 
-None of the four variables above needs to be set for the deployed factory. To make a round the
+None of the four factory variables (`LAUNCHER_FACTORY` to `ROUNDS_REFRESH_SECONDS`) needs to be set for the deployed factory. To make a round the
 featured one on a running server:
 
 ```bash
@@ -171,7 +195,9 @@ Routes that read a round answer `503 chain_unavailable` when the chain could not
 | `GET /rounds/:launcher/members` | That round's members. |
 | `POST /rounds/:launcher/checkin` | A daily report for that round. |
 | `GET /round`, `GET /me/:address`, `GET /members`, `POST /checkin` | The same four for the featured round. |
+| `GET /stats`, `GET /stats/:address` | Totals across every round, listed or not; with an address, that wallet's own. |
 | `POST /faucet`, `POST /admin/round` | Gas for a new wallet; the operator sets the featured round. |
+| `GET /health` | For the operator: the attester, the faucet's wallet and the origin announcer's state. |
 
 ### Signatures
 
@@ -192,6 +218,50 @@ same one.
 ### `GET /`
 
 `{ "service": "cypher-run-verifier", "ok": true }`
+
+### `GET /health`
+
+```json
+{
+  "service": "cypher-run-verifier", "ok": true,
+  "attester": "0x2f2a…", "faucetWallet": "0x…",
+  "origin": {
+    "registry": "0xb9ad45dc177c801f10670f2aac03b467f1c367d2",
+    "host": "name.trycloudflare.com", "onChain": "name.trycloudflare.com",
+    "lastTx": "0x…", "lastTxHost": "name.trycloudflare.com", "lastTxAt": 1795900000,
+    "pending": false, "checkedAt": 1795900060, "lastError": null
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `attester` | This server's attester address; `null` without a key. |
+| `faucetWallet` | The wallet the faucet pays from; `null` while the faucet is off. |
+| `origin` | `null` unless the origin announcer runs. `host` is this server's public host as last found; `onChain` is `origin()` as last read; `lastTx` is the last `setOrigin` this server sent (`null` if none since the start) and `pending` is `true` until it has a receipt. `lastError` is the code of what stopped the last check: `source_unavailable`, `bad_host`, `registry_unavailable`, `not_announcer`, `send_failed`, `tx_reverted` or `tx_dropped`. |
+
+### Origin announcer
+
+The server is reached through a Cloudflare quick tunnel whose host changes whenever the tunnel
+restarts. No build has that host in it: the apps read it from the `OriginRegistry` contract
+(`../contracts/src/OriginRegistry.sol`), and this server keeps it current. With `ORIGIN_REGISTRY`
+set, every `ORIGIN_CHECK_SECONDS` (default 60) it
+
+1. finds its public host: `ORIGIN_HOST` when set, otherwise `GET ORIGIN_SOURCE_URL` (cloudflared's
+   `/quicktunnel`, default `http://tunnel:20241/quicktunnel`). Anything that is not a plain hostname
+   is refused and nothing is sent;
+2. reads `origin()` from the registry (and, once, `announcer()`: when it is not this server's
+   attester address nothing is ever sent);
+3. when they differ, sends `setOrigin(host)` from the attester key, through the same one-at-a-time
+   queue as every other transaction of that wallet, and logs the host and the transaction hash.
+
+While a `setOrigin` has no receipt, no second one is sent; one with no receipt after ten minutes is
+treated as dropped and may be sent again. A failed step is logged once (without the error's own
+text, which can contain the RPC's address) and tried again on the next check. The checks run on a
+timer of their own, so no request waits for them. `GET /health` shows the state.
+
+Each `setOrigin` costs the attester's wallet gas (at most 200,000 gas at 1 gwei, 0.0002 test BNB),
+so that wallet needs a little test BNB even when the faucet has a key of its own.
 
 ### Rounds: how they are found and listed
 
@@ -384,6 +454,51 @@ a wallet appears after its first `GET /me/:address` or `POST /checkin` as a memb
 joined on chain and never opened the app is counted in `memberCount` of `GET /round` but is not in
 this list.
 
+### `GET /stats`, `GET /stats/:address`
+
+Every round our factory created added up, listed or not (and the featured round, when it is not one
+of them). The answer is numbers only: no round is named, so an unlisted round is counted without
+being shown. Rounds created with another attester are left out by the same rule as `GET /rounds`:
+their check-ins, deposits, launch and members are not counted, unless the round is the featured one.
+(A server started without a key counts every round.)
+
+```json
+{
+  "rounds": 3,
+  "people": 7,
+  "checkIns": 12,
+  "deposited": "5500",
+  "launched": 1,
+  "complete": true,
+  "raw": { "deposited": "5500000000000000000000" }
+}
+```
+
+| Field | From | Meaning |
+| --- | --- | --- |
+| `rounds` | chain | Rounds counted. |
+| `people` | this server | Wallets seen as a member of any of them, each counted once (see `GET /members` for who is seen). A wallet that joined on chain and never opened the app is not in it, so this is never more than the truth. |
+| `checkIns` | chain | `totalCheckIns` of every round, added. |
+| `deposited` | chain | `totalDeposits` of every round, added, in whole quote tokens. A deposit taken back after a missed deadline is no longer in it. |
+| `launched` | chain | Rounds whose token launched. |
+| `complete` | | `false` when a round could not be read: the totals leave it out and are lower than the truth. |
+
+`GET /stats/:address` is the same object plus `you`, that wallet across the rounds this server has
+seen it join:
+
+```json
+{ "you": { "address": "0x…", "rounds": 2, "days": 4, "claimed": "300", "raw": { "claimed": "300000000000000000000" } } }
+```
+
+`days` is `daysOf` on chain, added over those rounds; `claimed` is `claimedQuote` in the vaults of
+the launched ones. `you` is `null` when one of those rounds could not be read: no figure rather
+than a low one. A wallet never seen as a member answers zeros.
+
+The rounds are read the way `GET /rounds` reads them, with the same memory, and the sum is kept for
+10 seconds; a sum with a round missing is not kept. `you` costs at most two chain reads per round
+the wallet joined and is kept for 4 seconds. `503 chain_unavailable` when nothing could be read;
+`400 bad_address` for an address that is not one.
+
 ### `POST /checkin`
 
 Body `{ address, steps, source, signature }`.
@@ -433,8 +548,9 @@ one wallet, one day, one round, one chain. `test/attest.test.ts` pins the worked
 
 ### `POST /faucet`
 
-Body `{ address, signature }` (signature over `Cypher Run faucet <address>`). Sends **0.03 test BNB**
-from the attester's wallet, for gas. It does not send test USD: getting test dollars for the deposit
+Body `{ address, signature }` (signature over `Cypher Run faucet <address>`). Sends
+`FAUCET_DRIP_BNB` test BNB (**0.03** by default) from the faucet's wallet (`FAUCET_PRIVATE_KEY`, or
+the attester's when that is not set), for gas. It does not send test USD: getting test dollars for the deposit
 is a step the member takes in the app.
 
 ```json
@@ -448,21 +564,21 @@ in this order:
 
 | `reason` | Meaning |
 | --- | --- |
-| `faucet_disabled` | `FAUCET_ENABLED` is not `true`, or there is no key. |
+| `faucet_disabled` | `FAUCET_ENABLED` is not `true`, or there is no key for the faucet. |
 | `already_funded` | This address was funded before. Once per address, for good. |
 | `cap_reached` | 200 wallets have been funded in total. The faucet stays closed. |
-| `rate_limited` | 5 requests from this IP reached the sending step in the last hour. |
+| `rate_limited` | `FAUCET_PER_IP_PER_HOUR` requests (5 by default) from this IP reached the sending step in the last hour. |
 | `chain_unavailable` | The balances could not be read. Nothing was sent; ask again. |
 | `has_funds` | The address already holds 0.002 test BNB or more. This does not use up its one payout. |
-| `faucet_empty` | The attester's wallet would drop below 0.05 test BNB, which it keeps back. |
+| `faucet_empty` | The faucet's wallet would drop below 0.05 test BNB, which it keeps back. |
 | `send_failed` | The transfer could not be submitted. The address may ask again. |
 
 `400 bad_address` and `401 bad_signature` use the normal error shape. The faucet works with no
 round set. Requests are handled one at a time, so two requests at once cannot be paid twice. Payout
 records include the caller's IP address (see `TRUST_PROXY`).
 
-Budget: 200 wallets x 0.03 = 6 test BNB plus gas. Top the attester's wallet up accordingly, or the
-faucet answers `faucet_empty` long before the cap.
+Budget at the defaults: 200 wallets x 0.03 = 6 test BNB plus gas. Top the faucet's wallet up
+accordingly, or the faucet answers `faucet_empty` long before the cap.
 
 ### `POST /admin/round` (admin)
 
@@ -482,10 +598,13 @@ Accepted check-ins and the member list are kept per Launcher, so switching round
 
 ## Transactions
 
-The only transactions this server sends are the faucet's transfers. They are legacy transactions at
-a gas price of 1 gwei with a gas limit of 21,000: fee estimation on this testnet answers 1 wei, and
-such transactions are never mined. They go through one queue, one at a time, each with an explicit
-nonce, because a load-balanced public RPC can report a stale pending count.
+The only transactions this server sends are the faucet's transfers (gas limit 21,000) and
+`OriginRegistry.setOrigin` (gas limit 200,000). They are legacy transactions at a gas price of
+1 gwei with an explicit gas limit: fee estimation on this testnet answers 1 wei, and such
+transactions are never mined. Each wallet's transactions go through one queue, one at a time, each
+with an explicit nonce, because a load-balanced public RPC can report a stale pending count. With
+`FAUCET_PRIVATE_KEY` the faucet's wallet has a queue of its own; without it the faucet and
+`setOrigin` share the attester's.
 
 ## Checking against the real contracts
 
@@ -543,19 +662,28 @@ src/attest.ts    the attester's check-in signature (what the contract verifies)
 src/rules.ts     what a daily report must look like (pure)
 src/days.ts      UTC days and streaks (pure)
 src/faucet.ts    faucet amount and limits (pure)
+src/origin.ts    origin announcer: finds the public host, writes it to the OriginRegistry
 src/store.ts     Store interface + in-memory / JSON-file store
 src/chain.ts     viem reads of the Launcher and the vault; the factory's creation events; the
-                 faucet's transfers, one at a time
+                 OriginRegistry; the faucet's transfers and setOrigin, one at a time per wallet
 src/rounds.ts    which rounds exist: the scan of the factory's events, in chunks, kept in the store
+src/stats.ts     totals across every round, and one wallet's own (pure)
 src/app.ts       HTTP routes
 src/config.ts    builds the app from environment variables
-src/server.ts    entry; looks for new rounds every ROUNDS_REFRESH_SECONDS
+src/server.ts    entry; looks for new rounds every ROUNDS_REFRESH_SECONDS and starts the origin
+                 announcer
 test/            vitest: the contracts' signature vector, check-in rules, streaks across day
                  boundaries, GET /round, /me and /members on a fake chain, the admin route, faucet
                  limits, the /api base path, the data file, and the ABI fragments against
                  ../contracts/abi. test/rounds.test.ts: discovery and its store, the list's order
                  and states, the three-minute rule, registration by the creator only, the
-                 per-round routes against the single-round ones, a launcher from another factory
+                 per-round routes against the single-round ones, a launcher from another factory.
+                 test/stats.test.ts: the totals, an unlisted round counted and never named, one
+                 wallet's own numbers, the short memory, a round that cannot be read, a round
+                 with another attester left out. test/origin.test.ts: the announcer (unchanged
+                 host, changed host, pending, dropped and reverted transactions, bad hosts, the
+                 source or the RPC down), GET /health and the ORIGIN_* settings.
+                 test/faucet.test.ts also covers FAUCET_* settings and the separate faucet key
 test/e2e-fork.ts the full round against the real contracts on a local fork (npm run e2e:fork),
                  including discovery from the factory's event and POST /rounds
 Dockerfile       node:22-slim image, see "Running in Docker"
@@ -564,7 +692,7 @@ Dockerfile       node:22-slim image, see "Running in Docker"
 ## Not checked
 
 - The rounds run on the real testnet through the hosted server are recorded in `../PROOF.md` and
-  `../HOSTING.md`, not here. What this folder checks on chain is checked on a local fork
+  the top-level README's "Hosting" section, not here. What this folder checks on chain is checked on a local fork
   (`npm run e2e:fork`): there the contract accepted this server's signatures and the API matched the
   chain through creation, listing, join, check-in, launch and claim.
 - The multi-round routes were read against the real BSC testnet on 26 November 2026 from a local
@@ -572,10 +700,16 @@ Dockerfile       node:22-slim image, see "Running in Docker"
   had created ("Demo Day" featured, "morning movers" open, "Bangkok Showup" launched), and
   `GET /rounds/:launcher`, `.../me/:address` and `.../members` for "Demo Day" equalled `GET /round`,
   `GET /me/:address` and `GET /members`. That copy was not the hosted server. The hosted server
-  runs this build since the same day; what was checked there is in `../HOSTING.md`.
+  has run the multi-round routes since the same day (see `../PROOF.md`). The origin announcer,
+  `GET /health` and the separate faucet key have not run there yet.
 - `POST /rounds` has not been called with a real creator's signature outside the tests and the
   fork, and `POST /rounds/:launcher/checkin` has not been followed by a real `checkIn` transaction
   on the real testnet.
-- The faucet has not sent a real transaction with the new amount.
+- The faucet has not sent a real transaction with the new amount, nor from a separate
+  `FAUCET_PRIVATE_KEY`.
+- The origin announcer has not sent a real `setOrigin` yet: `origin()` on the registry was still
+  empty when this was written (26 November 2026). Reading `/quicktunnel` from the tunnel container
+  needs cloudflared's metrics server on `0.0.0.0:20241` (`--metrics`, as in
+  `../deploy/docker-compose.yml`); that has not been tried on the server.
 - The address pattern of a token's page on Flap for testnet tokens is not known here, which is why
   `FLAP_TOKEN_URL` has no default.

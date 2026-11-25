@@ -1,9 +1,11 @@
 // Nobody pays into a round they did not mean. Three rules, each held here
 // with fake timers:
 //   1. Home's cards move on by themselves only until the person first
-//      touches Home in this session; never while a sheet or a dialog is
-//      open, never when the app was opened from a round's link, never when
-//      the platform asks for reduced motion.
+//      touches Home in this session, scrolls it, or anything is opened over
+//      it (a sheet, a dialog, by touch or not); never when the app was
+//      opened from a round's link, never when the platform asks for reduced
+//      motion. A sheet's pay button names its round for as long as it is
+//      open.
 //   2. The primary action names the round it acts on, and the join sheet,
 //      the check-in sheet and the result name it in their title.
 //   3. The action is for the round it named when it was pressed: a sheet
@@ -244,23 +246,45 @@ void main() {
       expect(state.selected, order[0]);
     });
 
-    testWidgets('never while a sheet or a dialog is open', (tester) async {
-      final state = await makeState(server: threeRounds());
+    testWidgets('a sheet opened without a touch stops them for good', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: threeRounds(),
+        chain: threeChains(),
+      );
       await pumpHome(tester, state);
       final order = [for (final r in state.rounds) r.id];
       final home = tester.element(find.byType(HomeScreen));
+      expect(slider(tester).waiting, isTrue);
 
-      // A sheet that opened without a touch on Home.
+      // A sheet that opened without a touch on Home (the keyboard, a link).
       showJoinSheet(home, state, state.round!);
       await settle(tester, 14);
       expect(find.byType(JoinSheet), findsOneWidget);
+      expect(slider(tester).waiting, isFalse);
       await wait(tester, long);
       expect(state.selected, order[0]);
       Navigator.of(home).pop();
       await settle(tester, 14);
       expect(find.byType(JoinSheet), findsNothing);
 
-      // A dialog.
+      // Closed: nobody touched Home, and still the cards stay. The person
+      // was dealing with this round.
+      await wait(tester, long);
+      expect(state.selected, order[0]);
+      expect(slider(tester).waiting, isFalse);
+      expect(primaryLabel(tester), 'Join Demo Day · 500 USD');
+    });
+
+    testWidgets('a dialog opened without a touch stops them for good', (
+      tester,
+    ) async {
+      final state = await makeState(server: threeRounds());
+      await pumpHome(tester, state);
+      final order = [for (final r in state.rounds) r.id];
+      final home = tester.element(find.byType(HomeScreen));
+
       showDialog<void>(
         context: home,
         builder: (_) => const AlertDialog(title: Text('A dialog')),
@@ -271,12 +295,66 @@ void main() {
       expect(state.selected, order[0]);
       Navigator.of(home).pop();
       await settle(tester, 14);
+      await wait(tester, long);
+      expect(state.selected, order[0]);
+      expect(slider(tester).waiting, isFalse);
+    });
 
-      // Nobody has touched Home, so with nothing over it the cards move
-      // again (which shows it was the sheet and the dialog that held them).
-      expect(state.autoAdvance, isTrue);
-      await wait(tester, const Duration(seconds: 16));
-      expect(state.selected, order[1]);
+    testWidgets('a scroll of Home that is no touch stops them for good', (
+      tester,
+    ) async {
+      final state = await makeState(server: threeRounds());
+      await pumpHome(tester, state);
+      final order = [for (final r in state.rounds) r.id];
+      final page = tester.state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byKey(const Key('home-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      // The keyboard's Page Down, or a scroll bar: no finger on Home.
+      page.position.animateTo(
+        60,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.linear,
+      );
+      await settle(tester, 8);
+      page.position.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.linear,
+      );
+      await settle(tester, 8);
+      expect(slider(tester).waiting, isFalse);
+      await wait(tester, long);
+      expect(state.selected, order[0]);
+    });
+
+    testWidgets('the join sheet\'s pay button keeps naming its round', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: threeRounds(),
+        chain: threeChains(dollars: 2000),
+      );
+      await pumpHome(tester, state);
+      final home = tester.element(find.byType(HomeScreen));
+      // Opened without a touch, while the cards could still move.
+      showJoinSheet(home, state, state.round!);
+      await settle(tester, 14);
+      expect(namedIn(tester, JoinSheet), 'Demo Day');
+      expect(action('Pay deposit · 500 test USD'), findsOneWidget);
+
+      // A minute of looking at it: the round and the amount on the button
+      // do not change, and neither does the card behind it.
+      for (var i = 0; i < 12; i++) {
+        await wait(tester, const Duration(seconds: 5));
+        expect(namedIn(tester, JoinSheet), 'Demo Day');
+        expect(action('Pay deposit · 500 test USD'), findsOneWidget);
+        expect(state.selected, launcher);
+      }
     });
 
     testWidgets('never when the app was opened from a round link', (
@@ -572,11 +650,11 @@ void main() {
 
       // The sheet is still about "Demo Day" and its 500.
       expect(namedIn(tester, JoinSheet), 'Demo Day');
-      expect(find.text('Pay deposit · 500 USD'), findsNothing);
+      expect(find.text('Pay deposit · 500 test USD'), findsNothing);
       await tester.tap(action('Get test dollars'));
       await settle(tester, 14);
       expect(chain.calls, ['mint 500']);
-      await tester.tap(action('Pay deposit · 500 USD'));
+      await tester.tap(action('Pay deposit · 500 test USD'));
       await settle(tester, 14);
 
       expect(chain.asked, [launcher], reason: 'the deposit went to Demo Day');

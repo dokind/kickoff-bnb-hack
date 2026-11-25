@@ -3,14 +3,20 @@
 // the member takes in the app (anyone can mint it on BSC testnet). Pure functions, no I/O.
 import type { FaucetDrip } from "./types.js";
 
-/** Test BNB sent per wallet: 0.03. At 1 gwei that covers approve, join, a round of daily check-ins,
- *  a claim and even the launch transaction (about 0.007). */
+/** Test BNB sent per wallet unless FAUCET_DRIP_BNB says otherwise: 0.03. At 1 gwei that covers
+ *  approve, join, a round of daily check-ins, a claim and even the launch transaction (about 0.007). */
 export const DRIP_BNB_WEI = 30_000_000_000_000_000n;
+/** FAUCET_DRIP_BNB may be at most this much (1 test BNB). */
+export const MAX_DRIP_BNB_WEI = 1_000_000_000_000_000_000n;
 /** A wallet that already holds this much test BNB (0.002) is not funded. */
 export const MIN_BALANCE_WEI = 2_000_000_000_000_000n;
 /** The faucet stops for good after this many wallets. */
 export const GLOBAL_CAP = 200;
+/** Wallets one network (IP address) may get funded per hour, unless FAUCET_PER_IP_PER_HOUR says
+ *  otherwise. A room of people on one Wi-Fi shares one IP address. */
 export const PER_IP_PER_HOUR = 5;
+/** FAUCET_PER_IP_PER_HOUR may be at most this. */
+export const MAX_PER_IP_PER_HOUR = 1000;
 /** Test BNB the server wallet keeps back (0.05), so the operator can still send a transaction from it. */
 export const RESERVE_WEI = 50_000_000_000_000_000n;
 
@@ -21,11 +27,17 @@ export type FaucetRefusal = "already_funded" | "cap_reached" | "rate_limited";
  * transfer failed (`failed`) does not count as funded and does not use up the global cap, but it
  * does count against the per-IP limit.
  */
-export function faucetRefusal(drips: FaucetDrip[], address: string, ip: string, now: number): FaucetRefusal | null {
+export function faucetRefusal(
+  drips: FaucetDrip[],
+  address: string,
+  ip: string,
+  now: number,
+  perIpPerHour: number = PER_IP_PER_HOUR,
+): FaucetRefusal | null {
   const done = drips.filter((d) => !d.failed);
   if (done.some((d) => d.address === address)) return "already_funded";
   if (done.length >= GLOBAL_CAP) return "cap_reached";
-  if (drips.filter((d) => d.ip === ip && d.at > now - 3600).length >= PER_IP_PER_HOUR) return "rate_limited";
+  if (drips.filter((d) => d.ip === ip && d.at > now - 3600).length >= perIpPerHour) return "rate_limited";
   return null;
 }
 

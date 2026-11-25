@@ -2,8 +2,8 @@
 
 > **This page is about the earlier design** (running club seasons: `ClubLauncher`, `GoalVault`, a
 > kickoff sent by our server and a settle step). It is kept as the record of a full launch through
-> the Flap Portal on testnet. The product is now Cypher Run (see [README.md](README.md)); its contracts
-> are new and are deployed at other addresses. The rounds run with them are in [PROOF.md](PROOF.md).
+> the Flap Portal on testnet. The product is now Cypher Run (see [README.md](../../README.md)); its contracts
+> are new and are deployed at other addresses. The rounds run with them are in [PROOF.md](../../PROOF.md).
 
 A full season of that earlier design (its working name was "Pacepact"), run on 25 November 2026 against the factories deployed for it and the hosted
 verifier (https://columbus-authentication-spine-cuts.trycloudflare.com/api). BSC testnet only (chain 97), test BNB and test USD with no value.

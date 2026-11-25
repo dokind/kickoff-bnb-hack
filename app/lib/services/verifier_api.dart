@@ -18,6 +18,25 @@ BigInt amountFromJson(Object? value, {int decimals = 18}) {
   return parseUnits(text, decimals: decimals) ?? BigInt.zero;
 }
 
+/// An amount the server sends both ways: `raw.<name>` in exact base units
+/// and `<name>` as a decimal string in whole units. The exact one is read
+/// first; the decimal string is taken as whole units, never as base units,
+/// so a large whole number is not misread.
+BigInt exactAmountFromJson(
+  Map<String, dynamic> j,
+  String name, {
+  int decimals = 18,
+}) {
+  final raw = j['raw'];
+  if (raw is Map) {
+    final exact = '${raw[name] ?? ''}'.trim();
+    if (RegExp(r'^\d+$').hasMatch(exact)) return BigInt.parse(exact);
+  }
+  final value = j[name];
+  if (value == null) return BigInt.zero;
+  return parseUnits('$value', decimals: decimals) ?? BigInt.zero;
+}
+
 int _int(Object? value) => switch (value) {
   final num n => n.round(),
   final String s => int.tryParse(s) ?? double.tryParse(s)?.round() ?? 0,
@@ -268,6 +287,75 @@ class Member {
   );
 }
 
+/// Totals across every round our factory created, listed or not (GET
+/// /stats/:address). Numbers only: no round is named.
+class Stats {
+  Stats({
+    required this.people,
+    required this.checkIns,
+    required this.deposited,
+    required this.launched,
+    required this.complete,
+    this.you,
+  });
+
+  /// Unique wallets the server has seen as members.
+  final int people;
+
+  /// Check-ins on chain, all rounds together.
+  final int checkIns;
+
+  /// Deposits the rounds hold or launched with, in base units.
+  final BigInt deposited;
+
+  /// Rounds whose token launched.
+  final int launched;
+
+  /// False when the server could not read one of the rounds: the totals
+  /// are then lower than the truth.
+  final bool complete;
+
+  /// This wallet across the rounds it joined. Null when the server could
+  /// not read one of them.
+  final WalletStats? you;
+
+  factory Stats.fromJson(Map<String, dynamic> j) {
+    final you = j['you'];
+    return Stats(
+      people: _int(j['people']),
+      checkIns: _int(j['checkIns']),
+      deposited: exactAmountFromJson(j, 'deposited'),
+      launched: _int(j['launched']),
+      complete: j['complete'] != false,
+      you: you is Map<String, dynamic> ? WalletStats.fromJson(you) : null,
+    );
+  }
+}
+
+/// One wallet across every round it joined.
+class WalletStats {
+  WalletStats({
+    required this.rounds,
+    required this.days,
+    required this.claimed,
+  });
+
+  /// Rounds joined.
+  final int rounds;
+
+  /// Days shown up, all rounds together.
+  final int days;
+
+  /// Test USD claimed from the vaults of launched rounds, in base units.
+  final BigInt claimed;
+
+  factory WalletStats.fromJson(Map<String, dynamic> j) => WalletStats(
+    rounds: _int(j['rounds']),
+    days: _int(j['days']),
+    claimed: exactAmountFromJson(j, 'claimed'),
+  );
+}
+
 /// The server accepted today's check-in (POST /rounds/:launcher/checkin). The
 /// app sends
 /// `CheckInLauncher.checkIn(dayIndex, attesterSignature)` itself.
@@ -353,13 +441,51 @@ class VerifierException implements Exception {
 /// Every round has its own calls under `/rounds/<launcher>`. A server from
 /// before that knows one round only (`/round`, `/me`, `/members`,
 /// `/checkin`); [rounds] answers null there and the app falls back to those.
+///
+/// The server's address can change (see OriginService). When a call cannot
+/// connect, or the answer is 530 (Cloudflare's code for a tunnel that is
+/// gone) or a 502 or 503 without the server's own error body, the address is
+/// looked up once more and, if it changed, that one call is sent once more
+/// to the new address. Never more.
 class VerifierApi {
-  VerifierApi({http.Client? client, String? baseUrl})
-    : _http = client ?? http.Client(),
-      _base = baseUrl ?? AppConfig.verifierBaseUrl;
+  /// With no [baseUrl] every call uses [AppConfig.verifierBaseUrl] as it is
+  /// at that moment, and [relocate] defaults to
+  /// [AppConfig.refreshVerifierBaseUrl]. With a [baseUrl] the address is
+  /// fixed unless a [relocate] is given.
+  VerifierApi({
+    http.Client? client,
+    String? baseUrl,
+    Future<String> Function()? relocate,
+  }) : _http = client ?? http.Client(),
+       _pinned = baseUrl,
+       _relocate =
+           relocate ??
+           (baseUrl == null ? AppConfig.refreshVerifierBaseUrl : null);
 
   final http.Client _http;
-  final String _base;
+
+  /// The fixed address, when one was given (and the one moved to since).
+  String? _pinned;
+
+  /// Looks the server's address up again; returns the base URL to use.
+  final Future<String> Function()? _relocate;
+
+  String get _base => _pinned ?? AppConfig.verifierBaseUrl;
+
+  /// Answers that mean the server is not where the app thought: the tunnel
+  /// in front of it is gone (530) or nothing is behind it (502, 503 from the
+  /// tunnel). A 503 from the server itself carries a JSON body and is not
+  /// one of these.
+  static bool _gone(http.Response r) {
+    if (r.statusCode == 530) return true;
+    if (r.statusCode != 502 && r.statusCode != 503) return false;
+    try {
+      final body = jsonDecode(r.body);
+      return body is! Map || body['error'] is! String;
+    } catch (_) {
+      return true;
+    }
+  }
 
   // Texts signed with personal_sign. Addresses are always lower case so both
   // sides build the same text; the server rebuilds each one the same way.
@@ -395,12 +521,7 @@ class VerifierApi {
       '${AppConfig.productName}\'s server could not do that right now. Try '
       'again in a moment.';
 
-  Uri _url(String path) {
-    if (_base.isEmpty) {
-      throw VerifierException('This build has no server address yet.');
-    }
-    return Uri.parse('$_base$path');
-  }
+  static const _noAddress = 'This build has no server address yet.';
 
   dynamic _decode(http.Response r) {
     dynamic body;
@@ -424,29 +545,61 @@ class VerifierApi {
     return body;
   }
 
-  /// A network failure becomes one plain sentence; the cause (which may name
-  /// a host) is dropped.
-  Future<dynamic> _send(Future<http.Response> Function() send) async {
-    final http.Response r;
+  /// One try: the answer, or null when it could not connect. The cause of a
+  /// failure (which may name a host) is dropped.
+  Future<http.Response?> _try(
+    String base,
+    Future<http.Response> Function(Uri url) send,
+    String path,
+  ) async {
     try {
-      r = await send();
-    } on VerifierException {
-      rethrow;
+      return await send(Uri.parse('$base$path'));
     } catch (_) {
-      throw VerifierException(unreachable);
+      return null;
     }
+  }
+
+  /// Sends one call. When it cannot connect or the server is gone, looks the
+  /// address up again and, if it changed, sends it once more there. A
+  /// network failure becomes one plain sentence.
+  Future<dynamic> _send(
+    String path,
+    Future<http.Response> Function(Uri url) send,
+  ) async {
+    var base = _base;
+    http.Response? r = base.isEmpty ? null : await _try(base, send, path);
+    final relocate = _relocate;
+    if ((r == null || _gone(r)) && relocate != null) {
+      String next;
+      try {
+        next = await relocate();
+      } catch (_) {
+        next = base;
+      }
+      if (next.isNotEmpty && next != base) {
+        base = next;
+        if (_pinned != null) _pinned = next;
+        r = await _try(next, send, path);
+      }
+    }
+    if (r == null) {
+      throw VerifierException(base.isEmpty ? _noAddress : unreachable);
+    }
+    // Still nothing behind the address: say so plainly.
+    if (_gone(r)) throw VerifierException(unreachable, status: r.statusCode);
     return _decode(r);
   }
 
-  Future<dynamic> _get(String path) => _send(() => _http.get(_url(path)));
+  Future<dynamic> _get(String path) => _send(path, _http.get);
 
   Future<Map<String, dynamic>> _post(
     String path,
     Map<String, dynamic> body,
   ) async {
     final r = await _send(
-      () => _http.post(
-        _url(path),
+      path,
+      (url) => _http.post(
+        url,
         headers: {'content-type': 'application/json'},
         body: jsonEncode(body),
       ),
@@ -527,6 +680,19 @@ class VerifierApi {
       for (final m in list)
         if (m is Map<String, dynamic>) Member.fromJson(m),
     ];
+  }
+
+  /// The totals across every round, with [address]'s own. Null when the
+  /// server is from before it kept them (404).
+  Future<Stats?> stats(String address) async {
+    try {
+      return Stats.fromJson(
+        _map(await _get('/stats/${address.toLowerCase()}')),
+      );
+    } on VerifierException catch (e) {
+      if (e.status == 404) return null;
+      rethrow;
+    }
   }
 
   /// Sends today's steps, signed by the member's key. [source] is

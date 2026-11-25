@@ -3,6 +3,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pacepact/theme/theme.dart';
 import 'package:pacepact/theme/tokens.dart';
@@ -375,6 +376,83 @@ void main() {
       await tester.pump();
       expect(find.text('Launched.'), findsNothing);
       expect(bannerNote.value, isNull);
+    });
+  });
+
+  group('banner', () {
+    testWidgets('above the router, its words have no debug underline', (
+      tester,
+    ) async {
+      // As main.dart builds it: the banner sits in MaterialApp.builder,
+      // above the Navigator, where no Scaffold gives it a Material.
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: inAppTheme,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: AppBackdrop(child: child!),
+          ),
+          home: const SizedBox.expand(),
+        ),
+      );
+      bannerNote.value = BannerNote(BannerKind.info, 'Address copied.');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Address copied.'), findsOneWidget);
+
+      // The style the words are drawn in, with everything it inherits.
+      final drawn = tester
+          .renderObject<RenderParagraph>(find.text('Address copied.'))
+          .text
+          .style!;
+      expect(
+        drawn.decoration,
+        anyOf(isNull, TextDecoration.none),
+        reason: 'no yellow underline',
+      );
+      expect(drawn.fontSize, 14);
+      expect(drawn.fontFamily, isNot('monospace'));
+      expect(
+        find.ancestor(
+          of: find.text('Address copied.'),
+          matching: find.byType(Material),
+        ),
+        findsWidgets,
+      );
+      bannerNote.value = null;
+      await tester.pump();
+    });
+  });
+
+  group('testnet', () {
+    testWidgets('the TESTNET pill: small, permanent, not a control', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(inApp(const Center(child: TestnetPill())));
+      expect(find.text('TESTNET'), findsOneWidget);
+      final style = tester
+          .renderObject<RenderParagraph>(find.text('TESTNET'))
+          .text
+          .style!;
+      expect(style.fontSize, greaterThanOrEqualTo(12));
+      expect(style.decoration, anyOf(isNull, TextDecoration.none));
+      expect(tester.getSize(find.byType(TestnetPill)).height, 24);
+      expect(
+        tester.getSemantics(find.byType(TestnetPill)),
+        isSemantics(
+          label: 'Testnet. Test money only, no real value.',
+          isButton: false,
+          hasTapAction: false,
+        ),
+      );
+      semantics.dispose();
+    });
+
+    test('test money is written "test USD"', () {
+      expect(testUsd, 'test USD');
+      expect(formatTestUsd(usd(1000)), '1,000 test USD');
+      expect(formatTestUsd(usd(822.32)), '822.32 test USD');
     });
   });
 

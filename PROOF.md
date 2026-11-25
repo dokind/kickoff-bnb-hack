@@ -4,14 +4,87 @@
 > which is why the first round and its token carry that name.
 
 Two rounds were opened on 25 November 2026 with the deployed `CheckInLauncherFactory`, against the
-hosted server (https://columbus-authentication-spine-cuts.trycloudflare.com, API under `/api/`). BSC testnet only (chain 97): test BNB and Flap's
-free-mint test USD. Nothing here has any value.
+hosted server, reached then at the Cloudflare quick tunnel host
+`columbus-authentication-spine-cuts.trycloudflare.com` (API under `/api/`). A quick tunnel's host
+changes whenever it restarts; from 26 November the server writes its current host to OriginRegistry.
+When this page was read, `origin()` was still empty (see "Read on 26 Nov 2026"). BSC testnet only (chain 97): test BNB and Flap's free-mint test
+USD. Nothing here has any value.
 
 - **Round 1, "Bangkok Showup": complete.** Three members joined, the bar filled, a member launched
   the token through the Flap Portal, trading tax reached the vault, and the two members who showed
   up claimed in proportion to their days.
-- **Round 2, "Demo Day": open**, with the bar at 2 of 5, set as the current round on the hosted server,
-  for the live demo.
+- **Round 2, "Demo Day": open.** It was left with the bar at 2 of 5 on 25 November and set as the
+  featured round on the hosted server, for the live demo. On 26 November it stood at 4 of 5 with
+  6 members (below).
+
+## Read on 26 Nov 2026
+
+Read by hand with `cast` against `https://bsc-testnet-rpc.publicnode.com` at block 144849738,
+03:12 in Bangkok on 26 November 2026 (20:12 UTC on 25 November). Every line can be read again with
+the call named.
+
+**"Demo Day"** (`0x378d729aE7122e5Cf7d6f4ed8797710d2503EDb5`):
+
+| | Read | Call |
+|---|---|---|
+| Bar | 4 of 5 | `totalCheckIns()`, `checkInGoal()` |
+| Members | 6 | `memberCount()` |
+| Deposits | 3,000 test USD (6 × 500) | `totalDeposits()`, `deposit()` |
+| Sponsor money | 1,500 test USD (the deployer, 25 Nov) | `totalSponsored()` |
+| Token pool if launched now | 2,400 test USD (1,500 + 30% of 3,000), above Flap's 1,500 | `poolQuoteNow()` |
+| Prize if launched now | 2,100 test USD (70% of 3,000) | `prizeQuoteNow()` |
+| Launched | no | `launched()` |
+| Deadline | 2026-11-28 16:34:21 UTC (`1795883661`) | `deadline()` |
+| Attester | `0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7` | `attester()` |
+
+Its `Joined` and `CheckedIn` events (times UTC, 25 November):
+
+| Member | Joined | Check-ins | Days |
+|---|---|---|---|
+| `0x7a38081096343B6A41109EF75ccE97863C21EB04` (script, "Ana") | 16:34:43 [`0xf6321160…524f77`](https://testnet.bscscan.com/tx/0xf632116030d8037ad373f213bed1a1cb240dec46a9272226e448fa36c9524f77) | day 20782 [`0x8dd90b97…945c2e`](https://testnet.bscscan.com/tx/0x8dd90b97132f536974cd6270601167ddb3963fac08b3b04abbe0bac658945c2e) | 1 |
+| `0x71a60c1e46d74b08ba12197D8f568D1AEB664E58` (script, "Ben") | 16:34:51 [`0x1fba7a2b…efe4fd`](https://testnet.bscscan.com/tx/0x1fba7a2bc0e2c9f08ea7f942fd97dcae718c346580ae1e1dc82fb9fda7efe4fd) | day 20782 [`0xb11356ce…16618d`](https://testnet.bscscan.com/tx/0xb11356cef0d10ee82e89fdd8a488d7ecd8552649511a6fee2a72fd0a8a16618d) | 1 |
+| `0x95Ced7B6D811509F8741c1C5B352353f3Ff8F4C2` | 17:02:19 [`0xe4f26955…814a6d`](https://testnet.bscscan.com/tx/0xe4f26955fab0bf185f0dbe36fe5502e2f7b8ad225531468186d871b294814a6d) | none | 0 |
+| `0x2c35a93666a4a3703469f2c359a1c98d7996ee85` | 17:03:54 [`0x22a59a25…8465cf`](https://testnet.bscscan.com/tx/0x22a59a25afddfcf90e113049b9dc393647c8292c55ce9ed78d5e47dbc88465cf) | day 20782 [`0xd9b6e794…d654ca`](https://testnet.bscscan.com/tx/0xd9b6e7946e54eca33235ec729439b07ce8500efb6d59e20707d9d48d5ed654ca) | 1 |
+| `0x580d21E31B49D8D21AD1d4E79F676142577e2997` | 17:29:46 [`0xd2d8d16c…d5d9ed`](https://testnet.bscscan.com/tx/0xd2d8d16c289359a7b1acccc58cc77912dd2d71642c0a4ed19933e418d2d5d9ed) | day 20782 [`0xa8b90b05…722ca6`](https://testnet.bscscan.com/tx/0xa8b90b05c5b937e53fb8e2b807deb5222ce19e04098cf30a7e99472179722ca6) | 1 |
+| `0x77313b6ef7773eefccd7831a0633e7410bb72f9e` | 17:32:30 [`0x0ac7d429…6acc59`](https://testnet.bscscan.com/tx/0x0ac7d42940a4152365649e66349044bd5db743fd3f3510058524e090386acc59) | none | 0 |
+
+All four check-ins are for 25 November (day 20782). One more check-in fills the bar: on 25 November
+UTC only from one of the two members with 0 days, from 26 November UTC (07:00 in Bangkok) from any
+member. Which of the four later wallets belong to people and which to tests was not recorded.
+
+**The factory on the Flap Portal.**
+`launcherFactoryMultiplier(0x2A872200B83dD025977d785cDE05356d23eA4153)` on the Portal
+(`0x000042108465206185A077Edc3F3fd2b49060000`) reads `true, 10000`: enabled at 1x. It was enabled
+in [`0x2a7d7106…d9ad45`](https://testnet.bscscan.com/tx/0x2a7d71063496b439a12248f90b133ce5230d7c9581a25b6af84ede2ec3d9ad45)
+(block 144839701, 2026-11-25 18:56:25 UTC), sent by the deployer to Flap's testnet helper
+`0x77779969a11eff7582f3bCf48135A846A3457777`; the Portal's event in that transaction carries the
+factory and `10000`.
+
+**OriginRegistry.** Deployed at [`0xb9aD45Dc177C801f10670F2aac03B467f1C367d2`](https://testnet.bscscan.com/address/0xb9aD45Dc177C801f10670F2aac03B467f1C367d2)
+in [`0x0387d2b0…596098`](https://testnet.bscscan.com/tx/0x0387d2b0e7a84d0a6b72f26d2fdd8ebc4fadd0bfb7620aa7cd231f4498596098)
+(block 144846127, 2026-11-25 19:44:43 UTC, 02:44 on 26 November in Bangkok) by the deployer, status
+success. `announcer()` reads `0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7`, the attester.
+`origin()` reads `""` and `updatedAt()` `0`: the server had not announced a host yet.
+
+**"Night Owls", created from the app.** The factory's `CheckInLauncherCreated` events name four
+rounds; the fourth is "Night Owls", Launcher `0x45ae23e5e28b4c90ce10f43266a7aa52d05ec608`, created
+in [`0xa5c23316…85baf74`](https://testnet.bscscan.com/tx/0xa5c233163ba5a8c49860c0061aceaf5a9f74f06426d6da3f94e0e657f85baf74)
+(block 144844114, 2026-11-25 19:29:37 UTC, 02:29 on 26 November in Bangkok). The transaction is
+`Portal.newLauncher` from `0x95Ced7B6D811509F8741c1C5B352353f3Ff8F4C2`, a wallet made by the app,
+with the 0.005 test BNB salt lock fee; status success. The round: 1,000 test USD deposit, 30% to the
+token pool, a bar of 6, deadline 2026-12-02 19:29:34 UTC, no members yet. The app's Invite sheet
+for it shows the Unlisted switch on ([docs/img/invite.png](docs/img/invite.png)): the app's public
+list leaves it out. That choice is kept by the server, not on chain, and was not read from the server
+here.
+
+**The other rounds.** "Bangkok Showup" is launched; its vault has received 1,233.480561266277444141
+test USD (`quoteReceived()`), paid all of it out (`totalQuotePaid()`) and holds 0 test USD, as in the
+table under round 1. "morning movers" (`0x74B9218cC901fa4b295C3B021c246E6f1022915B`, created from
+the app on 25 November at 17:27:37 UTC) has 1 member and 0 of 6 check-ins.
+
+**The attester wallet.** Its nonce reads 9, against 4 when this page was first written. The same
+wallet pays the faucet's gas transfers, so its nonce no longer shows by itself that it touched no
+round. No function of the Launcher or the vault needs the attester as the sender in any case.
 
 **Read this first.**
 
@@ -25,7 +98,8 @@ free-mint test USD. Nothing here has any value.
   server holds). That is the operator signing by hand. It is exactly what "check-ins are attested,
   not proven" means: whoever holds the attester key decides which check-ins count.
 - What the attester key cannot do was also seen here: the launch was sent by a member wallet, and
-  no transaction from the attester address touches either round (its nonce stayed at 4).
+  no transaction from the attester address touches either round (its nonce stayed at 4 through
+  both runs; see "Read on 26 Nov 2026" for later).
 
 ## Round 1: Bangkok Showup
 
@@ -69,7 +143,7 @@ free-mint test USD. Nothing here has any value.
    Deposits: 1,500 test USD. The pool would have received 30% of that, 450, under the 1,500 test USD
    Flap's Portal asks for.
 3. **Sponsor.** The deployer added 1,050 test USD with `sponsor(amount)`: [`0xc080cf7f414006afeb2c110e2cab3025c4dcdb69df3a476829d2055d2c98df22`](https://testnet.bscscan.com/tx/0xc080cf7f414006afeb2c110e2cab3025c4dcdb69df3a476829d2055d2c98df22).
-   Sponsor money goes to the pool only and earns no share. Pool money: 450 + 1,050 = 1,500.
+   Sponsor money goes to the token pool only and earns no share. Token pool: 450 + 1,050 = 1,500.
 4. **Check-ins.** One per wallet per UTC day, each with the attester's signature:
    - Ana, for 24 November (day 20781), signed by the script with the attester key, not through
      the server: [`0x7ce64219440253fcef1a08dcd96605dab933601c85d6f982fd698743fb28279b`](https://testnet.bscscan.com/tx/0x7ce64219440253fcef1a08dcd96605dab933601c85d6f982fd698743fb28279b)
@@ -118,7 +192,7 @@ The numbers add up as follows.
 
 After every stage the script read `GET /api/round` and `GET /api/me/<address>` for the three
 members from the hosted server and compared them with its own reads of the chain: members, bar,
-goal, deadline, deposits, sponsor money, pool money, launched, token, vault, and per member
+goal, deadline, deposits, sponsor money, token pool, launched, token, vault, and per member
 membership, days, today's check-in, claimable and claimed amounts. All nine comparisons matched.
 
 | Stage | Time (UTC) | Members | Bar | Launched | Days (Ana, Ben, Chai) | Claimed test USD (Ana, Ben, Chai) | Server = chain |
@@ -194,7 +268,8 @@ status success. Sender names: deployer `0xc1bD6aC9311b9345ae8023201875518429c8BF
 ## Round 2: Demo Day (open)
 
 Left open on purpose, so that people can join, check in and send the launch from the hosted app.
-It is the round the hosted server serves now (`GET https://columbus-authentication-spine-cuts.trycloudflare.com/api/round`).
+It was set as the hosted server's featured round (`GET /api/round`). The table below is as it was on
+25 November; what it read on 26 November is under "Read on 26 Nov 2026".
 
 | | |
 |---|---|
@@ -202,17 +277,17 @@ It is the round the hosted server serves now (`GET https://columbus-authenticati
 | Deposit | 500 test USD |
 | Part of the deposits that seeds the pool | 30% |
 | Bar (`checkInGoal`) | 5 check-ins |
-| Bar now | **2 of 5** (read from the chain at 2026-11-25 16:42:14 UTC) |
-| Members now | 2: Ana [`0x7a38081096343B6A41109EF75ccE97863C21EB04`](https://testnet.bscscan.com/address/0x7a38081096343B6A41109EF75ccE97863C21EB04) and Ben [`0x71a60c1e46d74b08ba12197D8f568D1AEB664E58`](https://testnet.bscscan.com/address/0x71a60c1e46d74b08ba12197D8f568D1AEB664E58) (throwaway wallets of the script) |
+| Bar then | **2 of 5** (read from the chain at 2026-11-25 16:42:14 UTC); 4 of 5 on 26 Nov |
+| Members then | 2 (6 on 26 Nov): Ana [`0x7a38081096343B6A41109EF75ccE97863C21EB04`](https://testnet.bscscan.com/address/0x7a38081096343B6A41109EF75ccE97863C21EB04) and Ben [`0x71a60c1e46d74b08ba12197D8f568D1AEB664E58`](https://testnet.bscscan.com/address/0x71a60c1e46d74b08ba12197D8f568D1AEB664E58) (throwaway wallets of the script) |
 | Sponsor | the deployer wallet, 1,500 test USD |
-| Pool money if launched now | 1,800 test USD (1,500 sponsor + 30% of 1,000), already above Flap's 1,500 |
-| Prize if launched now | 700 test USD |
+| Token pool if launched then | 1,800 test USD (1,500 sponsor + 30% of 1,000), already above Flap's 1,500 (2,400 on 26 Nov) |
+| Prize if launched then | 700 test USD (2,100 on 26 Nov) |
 | Opened | 2026-11-25 16:34:21 UTC |
 | Deadline | 2026-11-28 16:34:21 UTC (Sat 28 Nov 2026 23:34 Bangkok) |
 | Token | none yet: it exists only after somebody sends `launch()` with a full bar |
 
 Both check-ins are self-reported test entries for 25 November made by the script and signed by the
-hosted server. Three more check-ins fill the bar; one wallet can check in once per UTC day (a new
+hosted server. Three more check-ins filled the bar then (one more on 26 November); one wallet can check in once per UTC day (a new
 day starts at 07:00 in Bangkok). After the deadline without a launch, everyone can take their money
 back with `refund()`.
 
@@ -251,18 +326,21 @@ All 14 have status success.
 ```sh
 cd verifier
 
+# <host>: the server's current host, from
+#   cast call 0xb9aD45Dc177C801f10670F2aac03B467f1C367d2 "origin()(string)" --rpc-url https://bsc-testnet-rpc.publicnode.com
+
 # Round 1 as it was run (a new round each time; delete scripts/round-run.json first)
-VERIFIER_URL=https://columbus-authentication-spine-cuts.trycloudflare.com/api ROUND_NAME="Bangkok Showup" DEPOSIT_USD=500 \
+VERIFIER_URL=https://<host>/api ROUND_NAME="Bangkok Showup" DEPOSIT_USD=500 \
   CHECKIN_GOAL=3 YESTERDAY_CHECKIN=true npx tsx ../scripts/run-round.ts
 
 # Round 2 as it was opened
-VERIFIER_URL=https://columbus-authentication-spine-cuts.trycloudflare.com/api STATE_FILE=../scripts/demo-day-run.json ROUND_NAME="Demo Day" \
-  ROUND_SYMBOL=DEMODAY DEPOSIT_USD=500 CHECKIN_GOAL=5 MEMBER_COUNT=2 SPONSOR_USD=1500 DEADLINE_HOURS=72 \
+VERIFIER_URL=https://<host>/api STATE_FILE=../scripts/demo-day-run.json ROUND_NAME="Demo Day" \
+  ROUND_SYMBOL=<symbol> DEPOSIT_USD=500 CHECKIN_GOAL=5 MEMBER_COUNT=2 SPONSOR_USD=1500 DEADLINE_HOURS=72 \
   npx tsx ../scripts/run-round.ts
 
 # Round 2 again later: on a new UTC day it adds Ana's check-in for that day, and once somebody has
 # launched it does the trading and the claims
-VERIFIER_URL=https://columbus-authentication-spine-cuts.trycloudflare.com/api STATE_FILE=../scripts/demo-day-run.json npx tsx ../scripts/run-round.ts
+VERIFIER_URL=https://<host>/api STATE_FILE=../scripts/demo-day-run.json npx tsx ../scripts/run-round.ts
 ```
 
 The records behind this page are `scripts/round-run.json` and `scripts/round-result.json` (round 1)
@@ -270,8 +348,9 @@ and `scripts/demo-day-run.json` (round 2): addresses and transaction hashes only
 
 ## Not checked
 
-- The hosted web app was not clicked through against round 2 by a person. The server and the chain
-  were compared by script only.
+- The hosted web app was not clicked through against round 2 by a person on 25 November; the server
+  and the chain were compared by script only. The four later joins and two later check-ins in round 2
+  (26 Nov reads above) came from other wallets; which were people and which tests was not recorded.
 - No check-in in either round came from a phone's health data.
 - The outside account that dispatched the tax is assumed to be a Flap service; that was not confirmed.
   If it stops, anyone can call `dispatch()` on the tax processor, and `scripts/run-round.ts` does so
@@ -294,4 +373,4 @@ sent by our server and a settle step) also ran one complete season on BSC testne
 | Its factory (`ClubLauncherFactory`) | [`0x6dd91a33E3599b559b57a3045C55c4E1D0c76445`](https://testnet.bscscan.com/address/0x6dd91a33E3599b559b57a3045C55c4E1D0c76445) |
 
 The full record of that season, with every transaction, is kept in
-[PROOF-club-season.md](PROOF-club-season.md).
+[docs/archive/PROOF-club-season.md](docs/archive/PROOF-club-season.md).

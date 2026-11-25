@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
@@ -17,8 +18,9 @@ import '../widgets/tab_bar.dart';
 /// else. The balance is the hero. Under it, one list of four rows: the
 /// address (press to copy), "Back up your key", "Use another wallet" and
 /// "About", the last three each a sheet. Nobody has to come here to use the
-/// app, and nothing about rounds lives here: starting one and opening an
-/// invite link are behind the "+" on the tab bar.
+/// app. The only word about rounds is the money in them ("In rounds", under
+/// the balance, when this wallet is in an open round): starting one and
+/// opening an invite link are behind the "+" on the tab bar.
 class AccountScreen extends StatelessWidget {
   const AccountScreen({super.key, required this.state, this.showBar = true});
   final AppState state;
@@ -150,8 +152,8 @@ class AccountScreen extends StatelessWidget {
 }
 
 /// The balance: test USD in dot-matrix numerals, the test BNB for network
-/// fees under it, one note that none of it is real money, and "Get test
-/// dollars", which mints free test USD to this wallet the way the join
+/// fees under it, the deposits in open rounds, one note that none of it is
+/// real money, the wallet on BscScan, and "Get test dollars", which mints free test USD to this wallet the way the join
 /// sheet's first step does ([AppState.getTestDollars]).
 class BalanceCard extends StatefulWidget {
   const BalanceCard({super.key, required this.state});
@@ -199,6 +201,7 @@ class _BalanceCardState extends State<BalanceCard> {
     final c = context.colors;
     const usd = AppConfig.quoteSymbol;
     final preparing = _busy && _state.funding;
+    final inRounds = openRoundsJoined(_state);
     return GlassCard(
       padding: const EdgeInsets.all(20),
       tint: c.volt.withValues(alpha: 0.3),
@@ -276,6 +279,10 @@ class _BalanceCardState extends State<BalanceCard> {
               ),
             ],
           ),
+          if (inRounds.isNotEmpty) ...[
+            const SizedBox(height: Space.s3),
+            _InRounds(state: _state, rounds: inRounds),
+          ],
           const SizedBox(height: Space.s3),
           Text(
             _state.funding
@@ -283,7 +290,13 @@ class _BalanceCardState extends State<BalanceCard> {
                 : 'Test money on BSC testnet. It has no real value.',
             style: t.body(12).copyWith(color: c.text2),
           ),
-          const SizedBox(height: Space.s4),
+          const SizedBox(height: Space.s2),
+          LinkRow(
+            key: const Key('wallet-bscscan'),
+            label: 'View on BscScan',
+            url: '${AppConfig.explorerAddress}${_state.address}',
+          ),
+          const SizedBox(height: Space.s2),
           if (_error != null) ...[
             ErrorLine(_error!),
             const SizedBox(height: Space.s3),
@@ -301,6 +314,67 @@ class _BalanceCardState extends State<BalanceCard> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The open rounds (not launched, deadline not passed) this wallet has paid
+/// the deposit of, as the state knows them: the rounds on Home's slider
+/// and the set of rounds it is a member of. A launched round's deposit has
+/// left its contract; an ended one's is waiting as a refund.
+List<Round> openRoundsJoined(AppState state) => [
+  for (final r in state.rounds)
+    if (state.isMemberOf(r.launcher) &&
+        !r.launched &&
+        !(r.id == state.selected && state.launched) &&
+        !state.now.isAfter(r.deadline))
+      r,
+];
+
+/// "In rounds: 1,500 test USD" and the rounds' names: the deposits this
+/// wallet has in open rounds, which are not in the balance above.
+class _InRounds extends StatelessWidget {
+  const _InRounds({required this.state, required this.rounds});
+  final AppState state;
+  final List<Round> rounds;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.type;
+    final c = context.colors;
+    final total = rounds.fold<BigInt>(
+      BigInt.zero,
+      (sum, r) => sum + state.depositOf(r.id),
+    );
+    return Row(
+      key: const Key('wallet-in-rounds'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(Icons.lock_outline_rounded, size: 16, color: c.text2),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'In rounds: ${formatTestUsd(total)}',
+                style: t
+                    .body(13, FontWeight.w600)
+                    .copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+              ),
+              Text(
+                rounds.map((r) => r.name).join(', '),
+                style: t.body(13).copyWith(color: c.text2),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

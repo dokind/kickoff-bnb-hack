@@ -15,8 +15,14 @@ These are the Solidity contracts for that, on BNB Testnet (chain 97). One Launch
 |---|---|---|
 | `CheckInLauncherFactory` | [`0x2A872200B83dD025977d785cDE05356d23eA4153`](https://testnet.bscscan.com/address/0x2A872200B83dD025977d785cDE05356d23eA4153) | [`0x827f9b4e…079c094c`](https://testnet.bscscan.com/tx/0x827f9b4e404217a35e75fbef0f9ea0012f1c3e0d490ac87a88e31c44079c094c) |
 | `StreakVaultFactory` | [`0x0652AAD1d659344f6EdB9572723479aaece144Be`](https://testnet.bscscan.com/address/0x0652AAD1d659344f6EdB9572723479aaece144Be) | [`0x19a6d3aa…a1deb2a6`](https://testnet.bscscan.com/tx/0x19a6d3aa23f2d6e5458965070462f1411a62256d67403f8127232b4fa1deb2a6) |
+| `OriginRegistry` (26 November 2026) | [`0xb9aD45Dc177C801f10670F2aac03B467f1C367d2`](https://testnet.bscscan.com/address/0xb9aD45Dc177C801f10670F2aac03B467f1C367d2) | [`0x0387d2b0…4498596098`](https://testnet.bscscan.com/tx/0x0387d2b0e7a84d0a6b72f26d2fdd8ebc4fadd0bfb7620aa7cd231f4498596098) |
 
-The addresses of the earlier contracts (running club seasons, see `../PROOF.md`) are kept in
+`CheckInLauncherFactory` is enabled on the Flap Portal at 1x: `launcherFactoryMultiplier(address)` on
+the Portal reads `true, 10000` for it (enabled on 26 November 2026 in
+[`0x2a7d7106…d9ad45`](https://testnet.bscscan.com/tx/0x2a7d71063496b439a12248f90b133ce5230d7c9581a25b6af84ede2ec3d9ad45)).
+
+The addresses of the earlier contracts (running club seasons, see
+[`../docs/archive/PROOF-club-season.md`](../docs/archive/PROOF-club-season.md)) are kept in
 `deployments/bsc-testnet.club-season.json`.
 
 ## The rules of a round
@@ -25,7 +31,7 @@ The addresses of the earlier contracts (running club seasons, see `../PROOF.md`)
    a member. The quote token is Flap's free-mint test USD
    (`0x190C989D5665a0e404B444b53CAE9AbCfb600157`, 18 decimals).
 2. **Sponsor (optional).** `sponsor(amount)`: anyone may add quote. Sponsor money only ever goes to the
-   launch pool. It earns no share of anything. If the round does not launch, the sponsor takes it back.
+   token pool. It earns no share of anything. If the round does not launch, the sponsor takes it back.
 3. **Check in.** `checkIn(day, signature)`: members only, once per wallet per UTC day
    (`day = block.timestamp / 86400`), for today or yesterday only. It must carry the attester's
    signature for that wallet and day. Each check-in adds 1 to `daysOf[wallet]` and to `totalCheckIns`,
@@ -67,12 +73,12 @@ The attester is one address chosen when the round is created: our server.
 
 ### The pool floor
 
-Flap's Portal enforces a minimum pool size at launch. For half the supply it is **1,500 USD** today
+Flap's Portal enforces a minimum pool size at launch. For half the supply it is **1,500 test USD** today
 (Flap can change it). `poolQuoteNow()` returns what the pool would get right now; show it next to the
 floor. Below the floor the Portal reverts the whole `launch()` with the custom error `0xa32ef056` and
 two words, `(poolQuote offered, floor required)`; nothing changes and the round stays open, so a
-sponsor can top the pool up and anyone can call `launch()` again. With three members at a 1,000 USD
-deposit and 30%, the pool is 900 USD and needs 600 USD of sponsor money. If nobody adds it before the
+sponsor can top the pool up and anyone can call `launch()` again. With three members at a 1,000 test USD
+deposit and 30%, the pool is 900 test USD and needs 600 test USD of sponsor money. If nobody adds it before the
 deadline, everyone is refunded.
 
 ## Credit
@@ -86,7 +92,8 @@ repository unmodified, as it requires. The fork test is adapted from its `test/F
 `SPDX-License-Identifier: MIT` headers, which are kept, and the files here use the same identifier.
 
 The Portal call, the salt handling, the fee slots and the pairing of the two factories are the ones
-that already launched a token on testnet in the earlier contracts (`../PROOF.md`).
+that already launched a token on testnet in the earlier contracts
+([`../docs/archive/PROOF-club-season.md`](../docs/archive/PROOF-club-season.md)).
 
 ## Layout
 
@@ -97,12 +104,14 @@ src/
 ├── CheckInLauncherFactory.sol  called by the Portal to create a CheckInLauncher
 ├── CheckInLauncher.sol         join, sponsor, checkIn, launch (anyone), refund
 ├── StreakVaultFactory.sol      called by the Portal during the launch to create the StreakVault
-└── StreakVault.sol             holds the reserve, the prize and the tax; claim by days checked in
+├── StreakVault.sol             holds the reserve, the prize and the tax; claim by days checked in
+└── OriginRegistry.sol          the server's current host, set by the attester key, read by the apps
 test/
 ├── RoundBase.sol               shared setup: a mock Portal at the Portal's real address, helpers
 ├── CheckInLauncher.t.sol       every rule and revert of a round, the config vector, the signature vector
 ├── StreakVault.t.sol           claim maths, rounding, the vault factory's checks
 ├── Salt.t.sol                  pins the salt formula below
+├── OriginRegistry.t.sol        who may set the origin, empty values, the event
 └── ShowupRound.fork.t.sol      whole rounds against the live testnet Portal
 script/Deploy.s.sol             deploys the two factories, writes deployments/bsc-testnet.json
 deployments/                    written by a real deploy: the addresses the app and the verifier use
@@ -123,13 +132,15 @@ forge build
 ## Test
 
 ```sh
-forge test               # 63 unit tests; the fork suite is skipped when BSC_TESTNET_RPC_URL is not set
+forge test               # 69 pass; the fork suite is skipped when BSC_TESTNET_RPC_URL is not set
 
 export BSC_TESTNET_RPC_URL=https://bsc-testnet-rpc.publicnode.com
-forge test -vv           # 68 tests, including the 5 fork tests (about 40 seconds)
+forge test -vv           # 74 tests, including the 5 fork tests (about 30 seconds)
 ```
 
-Last run, 25 November 2026: 68 passed, 0 failed, 0 skipped.
+Last run, 26 November 2026: 74 passed, 0 failed, 0 skipped with the RPC (44 in
+`CheckInLauncher.t.sol`, 17 in `StreakVault.t.sol`, 6 in `OriginRegistry.t.sol`, 2 in `Salt.t.sol`,
+5 fork tests); 69 passed and the fork suite skipped without it.
 
 The unit tests (`test/CheckInLauncher.t.sol`, `test/StreakVault.t.sol`) need no RPC. They run our
 contracts unchanged against a mock Portal placed at the Portal's real address, which creates the vault
@@ -143,21 +154,21 @@ order, a member with zero days, and rounding (fuzzed: at most 2 wei of each asse
 members).
 
 The fork tests (`test/ShowupRound.fork.t.sol`) run against the live Portal with nothing mocked and
-without touching the Portal's settings: the factories are **not** enabled by Flap. The journey:
+without touching the Portal's settings and without relying on the factory being enabled. The journey:
 
 1. the creator opens a round with `Portal.newLauncher`; the Portal's creation event carries our
    `description()` (2,522 bytes);
-2. three members mint test USD and join with 1,000 USD each; a second join reverts;
+2. three members mint test USD and join with 1,000 test USD each; a second join reverts;
 3. day one: a forged signature and a non-member are rejected; four check-ins (one for yesterday);
    a replay reverts; `launch()` reverts below the goal, also for the attester;
 4. day two (time moved forward one day): two more check-ins fill the bar of six;
-5. `launch()` reverts at the Portal because 900 USD is below the floor; a sponsor adds 600 USD;
-6. a wallet with no role and no deposit calls `launch()`: 1,500 USD and half the supply are in the
-   pool, the other half and the 2,100 USD prize are in the vault, the Launcher holds nothing;
+5. `launch()` reverts at the Portal because 900 test USD is below the floor; a sponsor adds 600 test USD;
+6. a wallet with no role and no deposit calls `launch()`: 1,500 test USD and half the supply are in the
+   pool, the other half and the 2,100 test USD prize are in the vault, the Launcher holds nothing;
 7. the member with 3 of 6 days claims straight away: half the tokens and half the prize;
-8. real swaps on the PancakeSwap testnet pool produce tax; about 37 USD reaches the vault;
+8. real swaps on the PancakeSwap testnet pool produce tax; about 37 test USD reaches the vault;
 9. she claims again for the tax, the others claim everything at once: 3/6, 2/6 and 1/6 of the tokens
-   and of prize plus tax (about 1,068.59, 712.39 and 356.20 USD for a 1,000 USD deposit each);
+   and of prize plus tax (about 1,068.59, 712.39 and 356.20 test USD for a 1,000 test USD deposit each);
 10. the sponsor, the creator, the attester and the launch's caller cannot claim, and nobody can refund.
 
 Plus: the refund path when the bar never fills (members and the sponsor), the refund path when the bar
@@ -394,8 +405,8 @@ error NothingToClaim();
 
 Tax is collected in the token on each swap (3% on buys, 5% on sells), sold into the quote token by the
 token's tax processor once enough has built up, and paid out when anyone calls `dispatch()` on
-`ITaxToken(token).taxProcessor()`. In the fork test a 1,000 USD buy followed by one sell-and-rebuy
-round sent about 37 USD to the vault.
+`ITaxToken(token).taxProcessor()`. In the fork test a 1,000 test USD buy followed by one sell-and-rebuy
+round sent about 37 test USD to the vault.
 
 ### Gas
 
@@ -418,7 +429,7 @@ Measured in the fork test against the live contracts (the call itself, without t
 |---|---|---|
 | **Creator** (anyone) | Open a round and choose its name, symbol, deposit, liquidity part, goal, deadline and attester. | Change any of it afterwards. Take deposits, sponsor money, reserved tokens, prize or tax. The creator has no rights after opening the round. |
 | **Member** (anyone who paid the deposit) | Check in once a day with the attester's signature. Launch. Claim a share by days checked in. Take the full deposit back if the deadline passes without a launch. | Check in without the attester's signature, twice for one day, for a future day or one older than yesterday. Take the deposit back before the deadline or after a launch. |
-| **Sponsor** (anyone) | Add quote to the launch pool. Take it back if the deadline passes without a launch. | Claim anything from the vault. Take the money back after a launch: it is pool liquidity then. |
+| **Sponsor** (anyone) | Add quote to the token pool. Take it back if the deadline passes without a launch. | Claim anything from the vault. Take the money back after a launch: it is pool liquidity then. |
 | **Attester** (one address, set at creation; our server) | Sign, or not sign, that a wallet moved enough on a day. | Launch early. Block a launch once the bar is full. Choose who is paid beyond signing daily check-ins. Move or receive funds. Change a check-in once it is on chain. |
 | **Anyone** | Call `launch()` once the bar is full and the deadline has not passed. | Launch before that, after the deadline, or twice. |
 | **Flap Portal** | Create Launchers and vaults through the factories, hand the reserved tokens to the vault. | Call anything else. |
@@ -434,6 +445,16 @@ What this means in plain terms:
 - **A deposit is not safe money once the token launches.** `liquidityBps` of it becomes pool liquidity.
   The rest is shared by days, so a member who showed up less than the others gets back less than they
   paid, and one who never checked in gets nothing.
+- **The reserved tokens are liquid at once.** The vault exists from the launch transaction and
+  `claim()` works from the next one; the tokens are ordinary ERC-20 tokens, so a member can sell
+  them straight away. Members sell into the same pool, so whoever sells first gets the best price
+  and later sellers get less for the same share. Nothing in these contracts releases them over time.
+- **The tax share is fixed at launch.** `totalCheckIns` and every `daysOf` are frozen when the
+  token launches, and the vault pays the tax by them. Days after the launch do not count: a member
+  who keeps showing up earns no more tax, and one who stops loses none. The tax is the token's 3% buy
+  and 5% sell tax under the launch's 30-day `taxDuration`; 80% of it reaches the vault only when
+  someone calls `dispatch()` on the token's tax processor (in round 1 an outside account did, and
+  183.48 test USD arrived; `../PROOF.md`).
 - **The attester is the one party members rely on**, for the honesty of check-ins and only for that.
   See "The attester, plainly".
 - **Flap's Guardian is relied on too**, because it can upgrade the Launcher and vault code.
@@ -441,11 +462,39 @@ What this means in plain terms:
   once, so two check-ins on its first day, if the attester signs both.
 - **Quote sent to the Launcher by a plain transfer**, not through `sponsor()`, is not recorded for
   anyone: it joins the prize at launch, and is stuck if the round does not launch.
-- **Testnet only.** On mainnet, Flap requires factories to be audited and enabled. On testnet today
-  token creation is not paused, so the factories work without being enabled; if Flap pauses testnet
-  creation (`Portal.featureFlags() & 1 != 0`), it would have to enable `CheckInLauncherFactory` first.
-  The deploy script prints a warning in that case and the fork test fails with a clear message.
+- **Testnet only.** On mainnet, Flap requires factories to be audited and enabled. On testnet
+  `CheckInLauncherFactory` is enabled at 1x (`launcherFactoryMultiplier` reads `true, 10000`, set
+  through Flap's testnet helper, which anyone can call for any factory, so read it back before a
+  demo). If Flap pauses testnet creation (`Portal.featureFlags() & 1 != 0`), the deploy script prints
+  a warning and the fork test fails with a clear message.
 - These contracts have not been audited.
+
+## OriginRegistry
+
+`src/OriginRegistry.sol`, deployed at
+[`0xb9aD45Dc177C801f10670F2aac03B467f1C367d2`](https://testnet.bscscan.com/address/0xb9aD45Dc177C801f10670F2aac03B467f1C367d2).
+It tells the apps where the server can be reached right now. The server sits behind a Cloudflare
+quick tunnel whose host changes when the tunnel restarts; instead of building that host into the
+apps, the server writes it here and the apps read it before their first call.
+
+```solidity
+address public immutable announcer;   // the only address that may call setOrigin: the attester
+string public origin;                 // the server's host, no scheme or path ("" until first set)
+uint256 public updatedAt;             // block time of the last change
+function setOrigin(string calldata origin_) external;  // announcer only; reverts on ""
+event OriginChanged(string origin);
+error NotAnnouncer(); error EmptyOrigin(); error ZeroAnnouncer();
+```
+
+- `announcer` is fixed in the constructor. On testnet it reads
+  `0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7`, the same key that attests check-ins.
+- It holds no funds and gates nothing on chain. A wrong value can only send the apps to a server
+  that cannot sign check-ins, because each Launcher checks every check-in against its own
+  `attester`.
+- The server sends `setOrigin(host)` when `ORIGIN_REGISTRY` is set and the host it finds differs
+  from `origin()` (see `../verifier/README.md`).
+- `test/OriginRegistry.t.sol` covers: it starts empty, the announcer sets and moves the origin with
+  the event, and anyone else, an empty origin and a zero announcer are refused.
 
 ## ABIs
 

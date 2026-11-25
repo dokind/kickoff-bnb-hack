@@ -16,10 +16,12 @@ import { formatUnits, getAddress, isAddress, recoverMessageAddress } from "viem"
 import type { Attester } from "./attest.js";
 import type { Chain, ClaimState, MemberState, RoundState } from "./chain.js";
 import { dayIndexAt, dayString, streaks } from "./days.js";
-import { DRIP_BNB_WEI, FAUCET_MESSAGES, MIN_BALANCE_WEI, RESERVE_WEI, faucetRefusal } from "./faucet.js";
+import { DRIP_BNB_WEI, FAUCET_MESSAGES, MIN_BALANCE_WEI, PER_IP_PER_HOUR, RESERVE_WEI, faucetRefusal } from "./faucet.js";
+import type { OriginHealth } from "./origin.js";
 import { SERVICE_NAME, checkInMessage, faucetMessage, roundMessage } from "./product.js";
 import { LISTING_DELAY_SECONDS, createRounds, type Rounds } from "./rounds.js";
 import { DEFAULT_MIN_STEPS, checkReport, parseSteps } from "./rules.js";
+import { totals, walletTotals, type Totals, type WalletTotals } from "./stats.js";
 import type { Store } from "./store.js";
 import type { CheckIn, FaucetDrip, RoundRef, Source } from "./types.js";
 
@@ -31,6 +33,10 @@ const CLOSED_CACHE_FACTOR = 15;
 const LIST_STALE_MS = 300_000;
 /** Rounds read from the chain at the same time for GET /rounds. */
 const LIST_READS_AT_ONCE = 6;
+/** GET /stats answers from memory for this long before it adds the rounds up again. */
+export const STATS_CACHE_MS = 10_000;
+/** Wallets whose own totals (GET /stats/:address) are kept in memory at once. */
+const WALLET_MEMORY_SIZE = 500;
 
 export type RoundStatus = "open" | "launched" | "expired";
 
@@ -50,12 +56,20 @@ export interface Deps {
   faucetEnabled?: boolean;
   /** Network address of the caller, for the faucet's per-IP limit. Default: everyone shares one bucket. */
   clientIp?: (c: Context) => string;
+  /** FAUCET_DRIP_BNB in wei. Default DRIP_BNB_WEI (0.03 test BNB). */
+  faucetDripWei?: bigint;
+  /** FAUCET_PER_IP_PER_HOUR. Default PER_IP_PER_HOUR (5). */
+  faucetPerIpPerHour?: number;
+  /** The origin announcer's state for GET /health. Undefined when it is off. */
+  originHealth?: () => OriginHealth;
   /** Address of a token's page on Flap, with `{token}` where the token address goes. */
   flapTokenUrl?: string;
   /** The rounds our factory created. Default: none are discovered, only the featured round is known. */
   rounds?: Rounds;
   /** See LIST_CACHE_MS. 0 reads every round on every GET /rounds. */
   listCacheMs?: number;
+  /** See STATS_CACHE_MS. 0 adds the rounds up on every GET /stats. */
+  statsCacheMs?: number;
   /** GET /rounds scans for new rounds first when the last scan is older than this. */
   roundsMaxAgeMs?: number;
   /** ...and waits at most this long for that scan before answering with what is known. */
@@ -101,9 +115,13 @@ export function createApp({
   allowSelfReported = false,
   faucetEnabled = false,
   clientIp = () => "unknown",
+  faucetDripWei = DRIP_BNB_WEI,
+  faucetPerIpPerHour = PER_IP_PER_HOUR,
+  originHealth,
   flapTokenUrl,
   rounds = createRounds({ store }),
   listCacheMs = LIST_CACHE_MS,
+  statsCacheMs = STATS_CACHE_MS,
   roundsMaxAgeMs = 20_000,
   roundsWaitMs = 2_500,
   registerRetry = { times: 2, waitMs: 1_500 },
@@ -208,7 +226,27 @@ export function createApp({
     if (!(await store.getMembers(launcher)).includes(address)) await store.addMember(launcher, address, now());
   }
 
+  /**
+   * The Launcher has no list of members to read, so this is everyone this server has seen as a
+   * member of the round: a wallet appears after its first GET /me or POST /checkin as a member.
+   */
+  async function seenMembers(launcher: string, checkIns?: CheckIn[]): Promise<string[]> {
+    const days = checkIns ?? (await store.getCheckIns(launcher));
+    return [...new Set([...(await store.getMembers(launcher)), ...days.map((d) => d.address)])];
+  }
+
   app.get("/", (c) => c.json({ service: SERVICE_NAME, ok: true }));
+
+  // For the operator: what this server announces and which wallets it sends from. Nothing secret.
+  app.get("/health", (c) =>
+    c.json({
+      service: SERVICE_NAME,
+      ok: true,
+      attester: ourAttester,
+      faucetWallet: faucetEnabled ? (chain.faucet?.address ?? null) : null,
+      origin: originHealth?.() ?? null,
+    }),
+  );
 
   // ── The round ─────────────────────────────────────────────────────────────
 
@@ -296,9 +334,7 @@ export function createApp({
     const { ref } = found;
     const today = dayIndexAt(now());
     const checkIns = await store.getCheckIns(ref.launcher);
-    // The Launcher has no list of members to read, so this is everyone this server has seen as a
-    // member: a wallet appears after its first GET /me or POST /checkin as a member.
-    const addresses = [...new Set([...(await store.getMembers(ref.launcher)), ...checkIns.map((d) => d.address)])];
+    const addresses = await seenMembers(ref.launcher, checkIns);
     let onChain: { daysOf: number; checkedIn: boolean }[];
     try {
       onChain = await chain.members(ref.launcher, addresses, today);
@@ -441,6 +477,111 @@ export function createApp({
     return c.json({ launcher, unlisted });
   });
 
+  // ── Totals ────────────────────────────────────────────────────────────────
+  // GET /stats: every round our factory created added up, listed or not (and the featured round,
+  // when it is not one of them), except the rounds GET /rounds leaves out for their attester: a
+  // round created with another attester is not counted unless it is the featured round. The answer
+  // is numbers only. No round is named in it, so an unlisted round is counted without being shown.
+  // The rounds are read the way GET /rounds reads them, with the same short memory, and the sum is
+  // kept for `statsCacheMs`.
+  //
+  // What each number is: `checkIns`, `deposited` and `launched` are the chain's. `people` is the
+  // wallets this server has seen as members, each counted once however many rounds it joined; a
+  // wallet that joined on chain and never opened the app is not in it. A deposit taken back after
+  // a missed deadline is no longer in `deposited`.
+  //
+  // GET /stats/:address is the same object plus `you`: that wallet across the rounds this server
+  // has seen it join. `you` is null when one of those rounds could not be read: no figure rather
+  // than a low one.
+
+  type Counted = { launchers: string[]; states: (RoundState | null)[]; totals: Totals };
+  let statsMemory: { at: number; value: Counted } | null = null;
+  let statsRun: Promise<Counted | null> | null = null;
+
+  /** Null when nothing could be read from the chain at all. Requests made while one sum is being
+   *  worked out share it. */
+  function countEverything(): Promise<Counted | null> {
+    if (statsMemory && nowMs() - statsMemory.at < statsCacheMs) return Promise.resolve(statsMemory.value);
+    statsRun ??= (async () => {
+      await rounds.fresh(roundsMaxAgeMs, roundsWaitMs);
+      const featured = await currentRound();
+      const found = [...new Set([...(await rounds.all()).map((r) => r.launcher), ...(featured ? [featured.launcher] : [])])];
+      const read: (RoundState | null)[] = [];
+      for (let i = 0; i < found.length; i += LIST_READS_AT_ONCE) {
+        read.push(...(await Promise.all(found.slice(i, i + LIST_READS_AT_ONCE).map((l) => listState(l)))));
+      }
+      if (found.length > 0 ? read.every((s) => s === null) : !(await rounds.scanned())) return null;
+      // The same rule as GET /rounds: a round created with another attester is left out (its
+      // deposits, check-ins, launch and members), unless it is the featured round. A round that
+      // could not be read stays in as unknown, so the sum says it is incomplete.
+      const launchers: string[] = [];
+      const states: (RoundState | null)[] = [];
+      found.forEach((launcher, i) => {
+        const s = read[i] ?? null;
+        if (s && ourAttester !== null && s.attester !== ourAttester && featured?.launcher !== launcher) return;
+        launchers.push(launcher);
+        states.push(s);
+      });
+      const people = await Promise.all(launchers.map((l) => seenMembers(l)));
+      const value: Counted = { launchers, states, totals: totals(states, people) };
+      // A sum with a round missing is not kept: the next request tries that round again.
+      statsMemory = value.totals.complete ? { at: nowMs(), value } : null;
+      return value;
+    })().finally(() => {
+      statsRun = null;
+    });
+    return statsRun;
+  }
+
+  const walletMemory = new Map<string, { at: number; value: WalletTotals }>();
+
+  /** One wallet across the rounds it was seen to join: two chain reads at most per such round. */
+  async function countWallet(address: string, counted: Counted): Promise<WalletTotals | null> {
+    const kept = walletMemory.get(address);
+    if (kept && nowMs() - kept.at < listCacheMs) return kept.value;
+    const mine: { launcher: string; state: RoundState }[] = [];
+    for (const [i, launcher] of counted.launchers.entries()) {
+      if (!(await seenMembers(launcher)).includes(address)) continue;
+      const state = counted.states[i];
+      if (!state) return null;
+      mine.push({ launcher, state });
+    }
+    const today = dayIndexAt(now());
+    const perRound: { daysOf: number; claimedQuote: bigint; quoteDecimals: number }[] = [];
+    try {
+      for (let i = 0; i < mine.length; i += LIST_READS_AT_ONCE) {
+        perRound.push(
+          ...(await Promise.all(
+            mine.slice(i, i + LIST_READS_AT_ONCE).map(async ({ launcher, state }) => {
+              const me = await chain.member(launcher, address, today);
+              const claim = state.launched && state.vault ? await chain.claims(state.vault, address) : null;
+              return { daysOf: me.daysOf, claimedQuote: claim?.claimedQuote ?? 0n, quoteDecimals: state.quoteDecimals };
+            }),
+          )),
+        );
+      }
+    } catch {
+      return null;
+    }
+    const value = walletTotals(address, perRound);
+    if (walletMemory.size >= WALLET_MEMORY_SIZE) walletMemory.clear();
+    walletMemory.set(address, { at: nowMs(), value });
+    return value;
+  }
+
+  app.get("/stats", async (c) => {
+    const counted = await countEverything();
+    return counted ? c.json(counted.totals) : chainDown(c);
+  });
+
+  app.get("/stats/:address", async (c) => {
+    const address = addr(c.req.param("address"));
+    if (!address) return err(c, 400, "bad_address", "address must be an address");
+    const counted = await countEverything();
+    if (!counted) return chainDown(c);
+    return c.json({ ...counted.totals, you: await countWallet(address, counted) });
+  });
+
   // ── Check-in ──────────────────────────────────────────────────────────────
   // The member reports today's steps, signed with their own key. If the report passes the rules
   // the answer carries the attester's signature, and the member's wallet sends
@@ -522,7 +663,7 @@ export function createApp({
     const ip = clientIp(c);
 
     const run = faucetQueue.then(async () => {
-      const refusal = faucetRefusal(await store.getFaucetDrips(), address, ip, now());
+      const refusal = faucetRefusal(await store.getFaucetDrips(), address, ip, now(), faucetPerIpPerHour);
       if (refusal) return refuse(refusal);
       let balance: bigint, reserve: bigint;
       try {
@@ -531,11 +672,11 @@ export function createApp({
         return refuse("chain_unavailable");
       }
       if (balance >= MIN_BALANCE_WEI) return refuse("has_funds");
-      if (reserve < DRIP_BNB_WEI + RESERVE_WEI) return refuse("faucet_empty");
+      if (reserve < faucetDripWei + RESERVE_WEI) return refuse("faucet_empty");
 
       const drip: FaucetDrip = { address, ip, at: now(), bnbTx: null };
       try {
-        drip.bnbTx = await wallet.sendBnb(address, DRIP_BNB_WEI);
+        drip.bnbTx = await wallet.sendBnb(address, faucetDripWei);
       } catch {
         // Nothing left the wallet. Remembered for the per-IP limit only; the address may ask again.
         await store.putFaucetDrip({ ...drip, failed: true });

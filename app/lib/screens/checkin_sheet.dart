@@ -221,6 +221,34 @@ class _CheckInSheetState extends State<CheckInSheet> {
             style: t.body(12).copyWith(color: c.text2),
           ),
         ],
+        if (!pending) ...[
+          const SizedBox(height: Space.s3),
+          // Said here, where the steps are sent, on the web and on a phone
+          // (a browser skips the onboarding step that used to say it).
+          Row(
+            key: const Key('checkin-attested'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(
+                  Icons.lock_outline_rounded,
+                  size: 16,
+                  color: c.text2,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Your step count goes to our server, which signs the day: '
+                  'check-ins are attested, not proven. Only the day goes on '
+                  'chain.',
+                  style: t.body(12).copyWith(color: c.text2),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: Space.s5),
         if (_busy && _state.funding) ...[
           Text(
@@ -323,11 +351,11 @@ class _CheckInSheetState extends State<CheckInSheet> {
           MarkerScale(value: (steps ?? 0) / (min <= 0 ? 1 : min)),
           Row(
             children: [
-              Text('0', style: t.body(11).copyWith(color: c.text2)),
+              Text('0', style: t.body(12).copyWith(color: c.text2)),
               const Spacer(),
               Text(
                 '${formatCount(min)} steps to check in',
-                style: t.body(11).copyWith(color: c.text2),
+                style: t.body(12).copyWith(color: c.text2),
               ),
             ],
           ),

@@ -1,5 +1,6 @@
 // Home: one widget test per state of its primary action, plus the bar, the
-// prize, the members and the states with no round to show.
+// prize, the order of the sections, what a launch still needs and the
+// states with no round to show.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pacepact/app_state.dart';
@@ -8,6 +9,7 @@ import 'package:pacepact/services/verifier_api.dart';
 import 'package:pacepact/widgets/common.dart';
 import 'package:pacepact/widgets/dot_matrix.dart';
 import 'package:pacepact/widgets/gauges.dart';
+import 'package:pacepact/widgets/launch_floor_line.dart';
 
 import 'support.dart';
 
@@ -24,6 +26,33 @@ Finder action(String label) =>
 bool enabled(WidgetTester tester, String label) =>
     tester.widget<PillButton>(action(label)).onPressed != null;
 
+/// Scrolls Home down to the streak, under THE PRIZE.
+Future<void> showStreak(WidgetTester tester) async {
+  await tester.scrollUntilVisible(
+    find.text('YOUR STREAK'),
+    200,
+    scrollable: homeList,
+  );
+  await settle(tester);
+}
+
+/// Where [finder] sits in Home's list, from the top of its content: the
+/// same however far the list is scrolled.
+double contentTop(WidgetTester tester, Finder finder) =>
+    tester.getRect(finder).top +
+    tester.state<ScrollableState>(homeList).position.pixels;
+
+/// Home's own list (not the cards' sideways one inside it).
+final homeList = find
+    .descendant(
+      of: find.byKey(const Key('home-list')),
+      matching: find.byType(Scrollable),
+    )
+    .first;
+
+String? floorLine(AppState state) =>
+    LaunchFloorLine.textFor(state, state.round!);
+
 void main() {
   testWidgets(
     'not joined: "Join Morning Movers · 1,000 USD" opens the join sheet',
@@ -33,8 +62,9 @@ void main() {
 
       expect(action('Join Morning Movers · 1,000 USD'), findsOneWidget);
       expect(find.byType(PillButton), findsOneWidget, reason: 'one action');
+      // The streak, under THE PRIZE.
+      await showStreak(tester);
       expect(find.text('Round open · not joined yet'), findsOneWidget);
-      // The streak is the hero numeral.
       expect(find.text('YOUR STREAK'), findsOneWidget);
       expect(find.text('0'), findsWidgets);
       expect(find.text('days'), findsOneWidget);
@@ -53,6 +83,7 @@ void main() {
 
       expect(action('Check in · Morning Movers'), findsOneWidget);
       expect(enabled(tester, 'Check in · Morning Movers'), isTrue);
+      await showStreak(tester);
       expect(find.text('Not checked in today'), findsOneWidget);
       expect(
         find.text('Self-reported in the browser. Testnet only.'),
@@ -82,6 +113,7 @@ void main() {
       find.text('Come back tomorrow. The next day starts in 9 h.'),
       findsOneWidget,
     );
+    await showStreak(tester);
     expect(find.text('Checked in today'), findsOneWidget);
     expect(find.text('7'), findsWidgets);
     expect(find.text('7 days in this round'), findsOneWidget);
@@ -126,7 +158,7 @@ void main() {
     expect(enabled(tester, 'Launch Morning Movers'), isFalse);
     expect(
       find.text(
-        'The bar is full, but the token pool is 600 USD short of what Flap '
+        'The bar is full, but the token pool is 600 test USD short of what Flap '
         'needs.',
       ),
       findsOneWidget,
@@ -187,6 +219,7 @@ void main() {
 
     expect(action('Claim · Morning Movers'), findsOneWidget);
     expect(enabled(tester, 'Claim · Morning Movers'), isTrue);
+    await showStreak(tester);
     expect(find.text('Token launched'), findsOneWidget);
     expect(
       find.text('The token launched. Your share is waiting in the vault.'),
@@ -248,18 +281,36 @@ void main() {
 
     // The round's card: the bar is everyone's check-ins against the goal,
     // as a tick gauge. The count is the chain's (3), not the server's (2).
+    // The header says this is testnet money, beside the balance.
+    expect(find.byKey(const Key('testnet-pill')), findsOneWidget);
+    expect(find.text('TESTNET'), findsOneWidget);
+    // A chip as wide as its word, not a bar across the header.
+    expect(tester.getSize(find.byKey(const Key('testnet-pill'))).width,
+        lessThan(120));
     expect(find.text('Morning Movers'), findsOneWidget);
     expect(find.text('THE BAR'), findsOneWidget);
     expect(find.text('3 / 6 check-ins'), findsOneWidget);
     expect(find.text('Closes 2 Dec 2026'), findsOneWidget);
     expect(find.text('Prize so far 2,100 USD'), findsOneWidget);
+    // On the card only: THE PRIZE right under it does not say it again.
     expect(find.text('3 members'), findsOneWidget);
     expect(find.text('You\'re in'), findsOneWidget);
     expect(find.byType(TickGauge), findsOneWidget);
     expect(tester.widget<TickGauge>(find.byType(TickGauge)).progress, 0.5);
 
-    // The prize so far, in dot-matrix numerals.
+    // THE PRIZE: each member's days and what they are worth if it
+    // launched now (the prize of 2,100 over 3 check-ins). The person's own
+    // row says "You"; the others have a friendly name and their address.
     final list = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(find.text('You'), 200, scrollable: list);
+    expect(find.text('THE PRIZE'), findsOneWidget);
+    expect(find.text('0x2000…0002'), findsOneWidget);
+    expect(find.text('2 days'), findsOneWidget);
+    expect(find.text('1,400 USD'), findsOneWidget);
+    expect(find.text('1 day'), findsOneWidget);
+    expect(find.text('700 USD'), findsOneWidget);
+
+    // The prize so far, in dot-matrix numerals.
     await tester.scrollUntilVisible(
       find.text('TOKEN POOL'),
       200,
@@ -272,13 +323,7 @@ void main() {
     );
     expect(find.text('TOKEN POOL'), findsOneWidget);
     expect(find.text('900'), findsOneWidget);
-    expect(find.text('of 1,500 USD Flap needs'), findsOneWidget);
-
-    // Members: address, days, streak. The person's own row says "You".
-    await tester.scrollUntilVisible(find.text('You'), 200, scrollable: list);
-    expect(find.text('0x2000…0002'), findsOneWidget);
-    expect(find.text('2 days · streak 2 · in today'), findsOneWidget);
-    expect(find.text('1 day · streak 1'), findsOneWidget);
+    expect(find.text('of 1,500 test USD Flap needs'), findsOneWidget);
 
     // What the server can and cannot do is said plainly.
     await tester.scrollUntilVisible(
@@ -290,6 +335,176 @@ void main() {
       find.textContaining('cannot launch early, block a launch or move funds'),
       findsOneWidget,
     );
+    // A full bar alone does not launch: the token pool floor is said too.
+    expect(
+      find.text(
+        'Launch needs both: 6 check-ins and 1,500 test USD in the token '
+        'pool. Then anyone can launch it on Flap.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('anyone can launch the token on Flap'),
+      findsNothing,
+    );
+  });
+
+  group('the order on a 390 by 844 phone', () {
+    Future<double> actionTop(WidgetTester tester) async =>
+        tester.getRect(find.byKey(const Key('home-action'))).top;
+
+    testWidgets('a member: the cards, then what they would get, then the '
+        'streak', (tester) async {
+      final state = await makeState(
+        chain: FakeChain(isMember: true, daysOf: 1, totalCheckIns: 3),
+        server: FakeServer()
+          ..round = roundJson(totalCheckIns: 3)
+          ..members = [
+            {
+              'address': '0x2000000000000000000000000000000000000002',
+              'daysOf': 2,
+              'streak': 2,
+              'checkedInToday': true,
+            },
+            {
+              'address': testAddress,
+              'daysOf': 1,
+              'streak': 1,
+              'checkedInToday': false,
+            },
+          ],
+      );
+      await pumpHome(tester, state);
+      final top = await actionTop(tester);
+
+      // Without scrolling: the round's card and the start of THE PRIZE.
+      expect(tester.getRect(find.text('THE BAR')).bottom, lessThan(top));
+      expect(tester.getRect(find.text('THE PRIZE')).bottom, lessThan(top));
+      expect(
+        tester.getRect(find.text('If it launched now, you\'d get')).bottom,
+        lessThan(top),
+      );
+      // The amount itself within one short scroll (under 200 px).
+      final amount = tester.getRect(find.byKey(const Key('pot-amount')));
+      expect(amount.bottom - top, lessThan(200));
+      final amountAt = contentTop(tester, find.byKey(const Key('pot-amount')));
+
+      // THE PRIZE comes before the streak, and the streak is compact.
+      await showStreak(tester);
+      expect(amountAt, lessThan(contentTop(tester, find.text('YOUR STREAK'))));
+      expect(
+        tester.getSize(find.byKey(const Key('streak-number'))).height,
+        lessThan(80),
+      );
+      // Its information is all still there.
+      expect(find.text('Not checked in today'), findsOneWidget);
+      expect(find.text('1 day in this round'), findsOneWidget);
+      expect(find.byType(DayTrack), findsOneWidget);
+    });
+
+    testWidgets('a visitor: what a day is worth before the streak, without '
+        'scrolling', (tester) async {
+      final state = await makeState(
+        server: FakeServer()..round = roundJson(totalCheckIns: 4),
+      );
+      await pumpHome(tester, state);
+      final top = await actionTop(tester);
+      final worth = find.text(
+        'If it launched now, each day shown up would be worth about 525 '
+        'test USD.',
+        findRichText: true,
+      );
+      expect(worth, findsOneWidget);
+      expect(tester.getRect(worth).bottom, lessThan(top));
+    });
+  });
+
+  group('launch also needs the token pool', () {
+    const fiveMore =
+        'Launch also needs 1,500 test USD in the token pool: about 5 more '
+        'members at this deposit, or a sponsor.';
+
+    testWidgets('under THE PRIZE, above the streak, while the pool is short', (
+      tester,
+    ) async {
+      // Nothing in the pool yet: 1,500 short, 300 a member.
+      final state = await makeState(chain: FakeChain(pool: 0));
+      await pumpHome(tester, state);
+      final line = find.byKey(const Key('launch-floor'));
+      // Under THE PRIZE, its list and its invite.
+      final invite = contentTop(tester, find.text('Invite someone'));
+      expect(invite, greaterThan(contentTop(tester, find.text('THE PRIZE'))));
+      await tester.scrollUntilVisible(line, 200, scrollable: homeList);
+      await settle(tester);
+      expect(tester.widget<Text>(line).data, fiveMore);
+      final at = contentTop(tester, line);
+      expect(at, greaterThan(invite));
+      await showStreak(tester);
+      expect(at, lessThan(contentTop(tester, find.text('YOUR STREAK'))));
+    });
+
+    test(
+      'how many members, from the deposit and its part for the pool',
+      () async {
+        expect(floorLine(await makeState(chain: FakeChain(pool: 0))), fiveMore);
+        // 600 short: two more members at 300 each.
+        expect(
+          floorLine(await makeState(chain: FakeChain(pool: 900))),
+          'Launch also needs 1,500 test USD in the token pool: about 2 more '
+          'members at this deposit, or a sponsor.',
+        );
+        // 1 short: one more member.
+        expect(
+          floorLine(await makeState(chain: FakeChain(pool: 1499))),
+          'Launch also needs 1,500 test USD in the token pool: about 1 more '
+          'member at this deposit, or a sponsor.',
+        );
+        // A round whose deposit adds nothing to the pool.
+        expect(
+          floorLine(
+            await makeState(
+              chain: FakeChain(pool: 0),
+              server: FakeServer()..round = {...roundJson(), 'liquidityBps': 0},
+            ),
+          ),
+          'Launch also needs 1,500 test USD in the token pool. In this round '
+          'a deposit adds nothing to it, so it takes a sponsor.',
+        );
+      },
+    );
+
+    test('nothing when the pool has enough, after the launch, or after the '
+        'deadline', () async {
+      expect(floorLine(await makeState(chain: FakeChain(pool: 1500))), isNull);
+      expect(floorLine(await makeState(chain: FakeChain(pool: 4000))), isNull);
+      expect(
+        floorLine(
+          await makeState(
+            chain: FakeChain(launched: true, pool: 0, totalCheckIns: 6),
+            server: FakeServer()
+              ..round = roundJson(launched: true, totalCheckIns: 6),
+          ),
+        ),
+        isNull,
+      );
+      expect(
+        floorLine(
+          await makeState(
+            now: DateTime.utc(2026, 12, 3),
+            chain: FakeChain(pool: 0),
+          ),
+        ),
+        isNull,
+      );
+    });
+
+    testWidgets('not on Home when the pool has enough', (tester) async {
+      final state = await makeState(chain: FakeChain(pool: 1500));
+      await pumpHome(tester, state);
+      await showStreak(tester);
+      expect(find.byKey(const Key('launch-floor')), findsNothing);
+      expect(find.textContaining('Launch also needs'), findsNothing);
+    });
   });
 
   testWidgets('reads again every 20 s, but not while a sheet covers Home', (
@@ -361,6 +576,27 @@ void main() {
     await settle(tester);
     expect(find.text(VerifierApi.unreachable), findsNothing);
     expect(action('Join Morning Movers · 1,000 USD'), findsOneWidget);
+  });
+
+  testWidgets('320 by 568 with text at 1.5: Home lays out to its end', (
+    tester,
+  ) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final state = await makeState(
+      chain: FakeChain(isMember: true, daysOf: 1, totalCheckIns: 3),
+    );
+    usePhone(tester, size: const Size(320, 568));
+    await tester.pumpWidget(inApp(HomeScreen(state: state, showBar: false)));
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('testnet-pill')), findsOneWidget);
+    final list = find.byType(Scrollable).first;
+    for (var i = 0; i < 12; i++) {
+      await tester.drag(list, const Offset(0, -300));
+      await settle(tester, 2);
+      expect(tester.takeException(), isNull);
+    }
   });
 
   testWidgets('wide screens keep the centred 480px column', (tester) async {

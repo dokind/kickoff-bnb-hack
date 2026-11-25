@@ -188,14 +188,22 @@ void main() {
 
       expect(find.text('Pay the deposit'), findsOneWidget);
       expect(find.text('Deposit'), findsOneWidget);
-      expect(find.text('1,000 USD'), findsOneWidget);
+      // Every amount reads as test money.
+      expect(find.text('1,000 test USD'), findsOneWidget);
       expect(find.text('To the prize'), findsOneWidget);
-      expect(find.text('700 USD · 70%'), findsOneWidget);
+      expect(find.text('700 test USD · 70%'), findsOneWidget);
       expect(find.text('To the token pool'), findsOneWidget);
-      expect(find.text('300 USD · 30%'), findsOneWidget);
-      expect(find.text('If it has not by 2 Dec 2026'), findsOneWidget);
-      expect(find.text('Full deposit back'), findsOneWidget);
+      expect(find.text('300 test USD · 30%'), findsOneWidget);
+      expect(find.text('If it launches'), findsOneWidget);
+      expect(find.text('Last day to launch'), findsOneWidget);
+      expect(find.text('2 Dec 2026'), findsOneWidget);
+      expect(find.textContaining(RegExp(r'\d USD')), findsNothing);
       // The two steps. The first says plainly what it stands in for.
+      await tester.scrollUntilVisible(
+        find.textContaining('Testnet: free test dollars.'),
+        100,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(
         find.text(
           'Testnet: free test dollars. On mainnet this step is paying with '
@@ -209,7 +217,7 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       expect(
-        find.textContaining('Approves, then pays 1,000 USD'),
+        find.textContaining('Approves, then pays 1,000 test USD'),
         findsOneWidget,
       );
     });
@@ -227,21 +235,36 @@ void main() {
       await tester.tap(button('Get test dollars'));
       await settle(tester);
       expect(chain.calls, ['mint 1000']);
+      await tester.scrollUntilVisible(
+        find.text('Pay deposit'),
+        100,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(
         find.byIcon(Icons.check_rounded),
         findsOneWidget,
         reason: 'step 1',
       );
-      expect(find.text('1,000 USD'), findsNWidgets(2), reason: 'the balance');
+      expect(
+        find.text('1,000 test USD'),
+        findsNWidgets(2),
+        reason: 'the balance',
+      );
 
       // Step 2: pay it into the round.
       expect(button('Get test dollars'), findsNothing);
-      await tester.tap(button('Pay deposit · 1,000 USD'));
+      await tester.tap(button('Pay deposit · 1,000 test USD'));
       await settle(tester);
       expect(chain.calls, ['mint 1000', 'join 1000']);
       expect(state.isMember, isTrue);
       expect(find.text('YOU\'RE IN.'), findsOneWidget);
-      expect(button('Let\'s go'), findsOneWidget);
+      // The round is open: today's check-in is the way on, or later.
+      expect(button('Check in now'), findsOneWidget);
+      expect(button('Later'), findsOneWidget);
+      expect(
+        tester.widget<PillButton>(button('Check in now')).kind,
+        PillKind.volt,
+      );
     });
 
     testWidgets('a wallet that already holds the deposit starts at step 2', (
@@ -250,7 +273,7 @@ void main() {
       final state = await makeState(chain: FakeChain(dollars: 2500));
       await pumpBody(tester, JoinSheet(state: state, round: state.round!));
       expect(button('Get test dollars'), findsNothing);
-      expect(button('Pay deposit · 1,000 USD'), findsOneWidget);
+      expect(button('Pay deposit · 1,000 test USD'), findsOneWidget);
     });
 
     testWidgets('waits for the faucet\'s gas: "Preparing your wallet"', (
@@ -283,7 +306,7 @@ void main() {
       await settle(tester);
       expect(find.textContaining('Preparing your wallet'), findsNothing);
       expect(chain.calls, ['mint 1000']);
-      expect(button('Pay deposit · 1,000 USD'), findsOneWidget);
+      expect(button('Pay deposit · 1,000 test USD'), findsOneWidget);
     });
 
     testWidgets('a failed step is one sentence and the button says Try again', (
@@ -300,7 +323,246 @@ void main() {
       await tester.tap(button('Try again'));
       await settle(tester);
       expect(chain.calls, ['mint 1000']);
-      expect(button('Pay deposit · 1,000 USD'), findsOneWidget);
+      expect(button('Pay deposit · 1,000 test USD'), findsOneWidget);
+    });
+
+    testWidgets('what can be lost: three plain lines over the pay button', (
+      tester,
+    ) async {
+      final state = await makeState(chain: FakeChain(dollars: 2500));
+      await pumpBody(tester, JoinSheet(state: state, round: state.round!));
+
+      const lines = [
+        // CheckInLauncher.refund(): the whole deposit after a missed
+        // deadline.
+        'Round never launches: your 1,000 test USD comes back.',
+        // StreakVault: shares by days; no day, no share.
+        'It launches and you have no check-ins: nothing comes back.',
+        // launch(): liquidityBps of the deposits seeds the pool; Flap burns
+        // the LP.
+        'It launches: 30% of your deposit becomes the token pool for good.',
+      ];
+      final pay = tester.getRect(button('Pay deposit · 1,000 test USD'));
+      var above = 0.0;
+      for (final line in lines) {
+        expect(find.text(line), findsOneWidget, reason: line);
+        final rect = tester.getRect(find.text(line));
+        // In order, all of them over the button, none of them hidden.
+        expect(rect.top, greaterThan(above), reason: line);
+        expect(rect.bottom, lessThanOrEqualTo(pay.top), reason: line);
+        above = rect.top;
+      }
+      // Plain, in the sheet's quiet text, not an error.
+      final style = tester.widget<Text>(find.text(lines[1])).style!;
+      expect(style.color, AppColors.dark.text2);
+      expect(style.fontSize, greaterThanOrEqualTo(12));
+      expect(find.byKey(const Key('join-late')), findsNothing);
+    });
+
+    testWidgets('no token pool share: the third line is left out', (
+      tester,
+    ) async {
+      final server = FakeServer()..round!['liquidityBps'] = 0;
+      final state = await makeState(
+        server: server,
+        chain: FakeChain(dollars: 2500),
+      );
+      await pumpBody(tester, JoinSheet(state: state, round: state.round!));
+      expect(
+        find.text('Round never launches: your 1,000 test USD comes back.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('It launches and you have no check-ins: nothing comes back.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('becomes the token pool'), findsNothing);
+    });
+
+    testWidgets('one check-in from full: a warning, and "Join anyway"', (
+      tester,
+    ) async {
+      final chain = FakeChain(dollars: 2500);
+      final server = FakeServer()..round = roundJson(totalCheckIns: 5);
+      final state = await makeState(server: server, chain: chain);
+      await pumpBody(tester, JoinSheet(state: state, round: state.round!));
+
+      const warning =
+          'This round can launch before your first check-in. If it does, you '
+          'get nothing back.';
+      expect(find.text(warning), findsOneWidget);
+      expect(
+        find.text('5 of 6 check-ins: one more fills the bar.'),
+        findsOneWidget,
+      );
+      // Before paying: over the button.
+      expect(
+        tester.getRect(find.text(warning)).bottom,
+        lessThan(tester.getRect(button('Pay deposit · 1,000 test USD')).top),
+      );
+
+      // The first press pays nothing: it asks again, in other words.
+      await tester.tap(button('Pay deposit · 1,000 test USD'));
+      await settle(tester);
+      expect(chain.calls, isEmpty);
+      expect(button('Pay deposit · 1,000 test USD'), findsNothing);
+      expect(button('Join anyway'), findsOneWidget);
+      expect(find.text(warning), findsOneWidget);
+
+      // The second, explicit press pays.
+      await tester.tap(button('Join anyway'));
+      await settle(tester);
+      expect(chain.calls, ['join 1000']);
+      expect(find.text('YOU\'RE IN.'), findsOneWidget);
+      expect(button('Check in now'), findsOneWidget);
+    });
+
+    testWidgets('a small phone: the warning, the lines and the button fit', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: FakeServer()..round = roundJson(totalCheckIns: 5),
+        chain: FakeChain(dollars: 2500),
+      );
+      usePhone(tester, size: const Size(375, 667));
+      await tester.pumpWidget(
+        inApp(JoinSheet(state: state, round: state.round!)),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      final pay = tester.getRect(button('Pay deposit · 1,000 test USD'));
+      expect(pay.bottom, lessThanOrEqualTo(667));
+      expect(find.byKey(const Key('join-late')), findsOneWidget);
+      // The part over the button scrolls by itself when it is cramped: its
+      // window ends over the button and starts with the warning.
+      final window = tester.getRect(
+        find
+            .ancestor(
+              of: find.byKey(const Key('join-outcomes')),
+              matching: find.byType(SingleChildScrollView),
+            )
+            .first,
+      );
+      expect(window.bottom, lessThanOrEqualTo(pay.top));
+      expect(
+        tester.getRect(find.byKey(const Key('join-late'))).top,
+        greaterThanOrEqualTo(window.top),
+      );
+      expect(window.height, greaterThan(100));
+    });
+
+    testWidgets('320x568 with text at 1.5: the late sheet still fits', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: FakeServer()..round = roundJson(totalCheckIns: 5),
+        chain: FakeChain(dollars: 2500),
+      );
+      usePhone(tester, size: const Size(320, 568));
+      tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(
+        inApp(JoinSheet(state: state, round: state.round!)),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('join-late')), findsOneWidget);
+      final pay = tester.getRect(button('Pay deposit · 1,000 test USD'));
+      expect(pay.bottom, lessThanOrEqualTo(568));
+    });
+
+    testWidgets('a full bar warns too; a round far from full does not', (
+      tester,
+    ) async {
+      final full = await makeState(
+        server: FakeServer()..round = roundJson(totalCheckIns: 6),
+        chain: FakeChain(dollars: 2500),
+      );
+      await pumpBody(tester, JoinSheet(state: full, round: full.round!));
+      expect(find.byKey(const Key('join-late')), findsOneWidget);
+      expect(find.text('The bar is full: 6 of 6 check-ins.'), findsOneWidget);
+
+      // Two to go (the default round): one press pays, as before.
+      final chain = FakeChain(dollars: 2500);
+      final open = await makeState(
+        server: FakeServer()..round = roundJson(totalCheckIns: 4),
+        chain: chain,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await pumpBody(tester, JoinSheet(state: open, round: open.round!));
+      expect(find.byKey(const Key('join-late')), findsNothing);
+      await tester.tap(button('Pay deposit · 1,000 test USD'));
+      await settle(tester);
+      expect(chain.calls, ['join 1000']);
+    });
+
+    testWidgets('"Check in now" opens today\'s check-in for the same round', (
+      tester,
+    ) async {
+      final chain = FakeChain(dollars: 2500);
+      final server = FakeServer();
+      final state = await makeState(chain: chain, server: server);
+      usePhone(tester);
+      await tester.pumpWidget(
+        inApp(
+          Builder(
+            builder: (context) => Center(
+              child: TextButton(
+                onPressed: () => showJoinSheet(context, state, state.round!),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await settle(tester, 14);
+      await tester.tap(button('Pay deposit · 1,000 test USD'));
+      await settle(tester, 14);
+      expect(find.text('YOU\'RE IN.'), findsOneWidget);
+
+      await tester.tap(button('Check in now'));
+      await settle(tester, 20);
+      // The join sheet has closed and the check-in sheet is open on the
+      // round that was just joined.
+      expect(find.byType(JoinSheet), findsNothing);
+      expect(find.byType(CheckInSheet), findsOneWidget);
+      expect(
+        tester.widget<CheckInSheet>(find.byType(CheckInSheet)).round.id,
+        launcher,
+      );
+      expect(find.text('Check in today'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('steps')), '6214');
+      await tester.tap(button('Check in'));
+      await settle(tester, 14);
+      expect(chain.calls, ['join 1000', 'checkIn 20782']);
+      expect(find.text('CHECKED IN.'), findsOneWidget);
+    });
+
+    testWidgets('"Later" closes the sheet', (tester) async {
+      final state = await makeState(chain: FakeChain(dollars: 2500));
+      usePhone(tester);
+      await tester.pumpWidget(
+        inApp(
+          Builder(
+            builder: (context) => Center(
+              child: TextButton(
+                onPressed: () => showJoinSheet(context, state, state.round!),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await settle(tester, 14);
+      await tester.tap(button('Pay deposit · 1,000 test USD'));
+      await settle(tester, 14);
+      await tester.tap(button('Later'));
+      await settle(tester, 14);
+      expect(find.byType(JoinSheet), findsNothing);
+      expect(find.byType(CheckInSheet), findsNothing);
     });
   });
 
@@ -314,6 +576,19 @@ void main() {
       await pumpBody(tester, CheckInSheet(state: state, round: state.round!));
 
       expect(find.text('Self-reported, testnet only'), findsOneWidget);
+      // The caveats onboarding no longer shows in a browser are here, where
+      // the steps are typed.
+      expect(
+        find.textContaining('A browser cannot read health data.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Your step count goes to our server, which signs the day: '
+          'check-ins are attested, not proven. Only the day goes on chain.',
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('steps')), findsOneWidget);
       await tester.enterText(find.byKey(const Key('steps')), '6214');
       await tester.tap(button('Check in'));
@@ -443,7 +718,7 @@ void main() {
   });
 
   group('onboarding and routing', () {
-    testWidgets('a new device: hero, one button, then the browser note', (
+    testWidgets('a new device in a browser: hero, one button, then Home', (
       tester,
     ) async {
       final store = MemoryStore();
@@ -461,18 +736,24 @@ void main() {
       expect(find.text('RUN THE\nSTAKES.'), findsOneWidget);
       expect(find.byType(PillButton), findsOneWidget);
       expect(find.textContaining('wallet'), findsNothing);
+      // The sub-line is a concrete example, not a summary.
+      expect(
+        find.text(
+          'Put in 500. Show up each day. Split the prize with everyone who '
+          'did.',
+        ),
+        findsOneWidget,
+      );
 
       await press(tester, 'Get started');
       await settle(tester, 12);
       // The wallet was made silently and the faucet asked in the background.
       expect(store.key, isNotNull);
       expect(server.count('POST /faucet'), 1);
-      expect(find.text('CHECK IN\nIN THE BROWSER'), findsOneWidget);
-      expect(find.text('Self-reported, testnet only.'), findsOneWidget);
-      expect(find.text('Check-ins are attested, not proven.'), findsOneWidget);
-
-      await press(tester, 'Continue');
-      await settle(tester, 12);
+      // A browser has no health store to connect, so the step that would
+      // only list caveats is skipped: they are in the check-in sheet.
+      expect(find.text('CHECK IN\nIN THE BROWSER'), findsNothing);
+      expect(button('Continue'), findsNothing);
       expect(store.onboarded, isTrue);
       expect(find.byType(HomeScreen), findsOneWidget);
       expect(button('Join Morning Movers · 1,000 USD'), findsOneWidget);
@@ -491,9 +772,17 @@ void main() {
 
       await press(tester, 'Get started');
       await settle(tester, 12);
+      // A phone keeps the step: it asks for the one permission it needs.
+      expect(find.byType(OnboardingScreen), findsOneWidget);
+      expect(state.onboarded, isFalse);
       expect(find.text('CONNECT\nHEALTH CONNECT'), findsOneWidget);
       expect(find.text('Steps today'), findsOneWidget);
+      expect(find.text('Check-ins are attested, not proven.'), findsOneWidget);
       expect(find.text('Not now'), findsOneWidget);
+      expect(
+        tester.getSize(find.widgetWithText(TextButton, 'Not now')).height,
+        greaterThanOrEqualTo(44),
+      );
       await press(tester, 'Allow access');
       await settle(tester, 12);
       expect(health.asked, 1);
@@ -606,9 +895,9 @@ void main() {
       // No wallet yet: the first-run steps come first.
       expect(find.byType(OnboardingScreen), findsOneWidget);
       expect(state.selected, isNull);
+      // In a browser there is no permission to ask for: "Get started" is
+      // the only step.
       await press(tester, 'Get started');
-      await settle(tester, 12);
-      await press(tester, 'Continue');
       await settle(tester, 12);
 
       expect(find.byType(HomeScreen), findsOneWidget);
@@ -797,6 +1086,73 @@ void main() {
         findsNothing,
       );
       expect(find.text(testKeyHex), findsNothing);
+    });
+
+    testWidgets('the money in open rounds, and the wallet on BscScan', (
+      tester,
+    ) async {
+      final chain = FakeChain(isMember: true, dollars: 250)
+        ..others[launcherB] = FakeChain(isMember: true, deposit: 500)
+        ..others[launcherC] = FakeChain(isMember: true, launched: true)
+        ..others[launcherD] = FakeChain();
+      final server = FakeServer()
+        ..more.addAll([
+          roundJson(at: launcherB, name: 'Lumpini Striders')
+            ..['deposit'] = '500',
+          // Launched: its deposit has left the contract.
+          roundJson(at: launcherC, name: 'Night Owls', launched: true),
+          // Not a member.
+          roundJson(at: launcherD, name: 'Sunrise Club'),
+        ]);
+      final state = await makeState(chain: chain, server: server);
+      await pumpBody(tester, AccountScreen(state: state, showBar: false));
+
+      final row = find.byKey(const Key('wallet-in-rounds'));
+      expect(row, findsOneWidget);
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.text('In rounds: 1,500 test USD'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.text('Morning Movers, Lumpini Striders'),
+        ),
+        findsOneWidget,
+      );
+      // Under the balance, inside its card.
+      expect(
+        find.descendant(of: find.byType(BalanceCard), matching: row),
+        findsOneWidget,
+      );
+      expect(
+        tester.getTopLeft(row).dy,
+        greaterThan(tester.getTopLeft(find.byType(DotMatrixText)).dy),
+      );
+      expect(find.textContaining('Night Owls'), findsNothing);
+      expect(find.textContaining('Sunrise Club'), findsNothing);
+
+      final link = tester.widget<LinkRow>(
+        find.byKey(const Key('wallet-bscscan')),
+      );
+      expect(link.label, 'View on BscScan');
+      expect(link.url, 'https://testnet.bscscan.com/address/${state.address}');
+    });
+
+    testWidgets('no open round: no "In rounds" line, the link stays', (
+      tester,
+    ) async {
+      final state = await makeState(chain: FakeChain(dollars: 1000));
+      await pumpBody(tester, AccountScreen(state: state, showBar: false));
+      expect(find.byKey(const Key('wallet-in-rounds')), findsNothing);
+      expect(find.byKey(const Key('wallet-bscscan')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const Key('wallet-bscscan'))).height,
+        greaterThanOrEqualTo(44),
+      );
     });
 
     testWidgets('pressing the address row copies the address', (tester) async {
@@ -1368,20 +1724,21 @@ void main() {
           daysOpen: 7,
         ),
         [
-          'Join: 1,000 USD each, paid once.',
-          'Prize: 700 USD of each deposit, shared by days shown up.',
-          'Token pool: 300 USD of each deposit.',
+          'Join: 1,000 test USD each, paid once.',
+          'Prize: 700 test USD of each deposit, shared by days shown up.',
+          'Token pool: 300 test USD of each deposit.',
           'Token: half the supply and most of the trading tax, shared by '
               'days shown up.',
-          'Launch: once the group has 6 check-ins, anyone can launch the '
-              'token.',
+          'Launch needs both: 6 check-ins and 1,500 test USD in the '
+              'token pool.',
+          'Who launches: anyone, once both are there.',
           'No launch in 7 days: every deposit goes back.',
         ],
       );
       expect(
         NewRoundScreen.floorLine(deposit: 1000, bps: 3000),
-        'Flap needs 1,500 USD in the pool to launch: 5 people at this '
-        'deposit, or a sponsor.',
+        'Flap sets that pool floor. At this deposit it takes 5 people, or a '
+        'sponsor.',
       );
       expect(
         NewRoundScreen.dealLines(
@@ -1391,20 +1748,21 @@ void main() {
           daysOpen: 1,
         ),
         [
-          'Join: 2,000 USD each, paid once.',
-          'Prize: 1,000 USD of each deposit, shared by days shown up.',
-          'Token pool: 1,000 USD of each deposit.',
+          'Join: 2,000 test USD each, paid once.',
+          'Prize: 1,000 test USD of each deposit, shared by days shown up.',
+          'Token pool: 1,000 test USD of each deposit.',
           'Token: half the supply and most of the trading tax, shared by '
               'days shown up.',
-          'Launch: once the group has 30 check-ins, anyone can launch the '
-              'token.',
+          'Launch needs both: 30 check-ins and 1,500 test USD in the '
+              'token pool.',
+          'Who launches: anyone, once both are there.',
           'No launch in 1 day: every deposit goes back.',
         ],
       );
       expect(
         NewRoundScreen.floorLine(deposit: 2000, bps: 5000),
-        'Flap needs 1,500 USD in the pool to launch: 2 people at this '
-        'deposit, or a sponsor.',
+        'Flap sets that pool floor. At this deposit it takes 2 people, or a '
+        'sponsor.',
       );
       // The whole deposit in the pool: one line says there is no prize and
       // where the deposit goes, instead of "0 USD ... shared" and a
@@ -1417,19 +1775,20 @@ void main() {
           daysOpen: 30,
         ),
         [
-          'Join: 2,000 USD each, paid once.',
+          'Join: 2,000 test USD each, paid once.',
           'Prize: none. The whole deposit goes to the token pool.',
           'Token: half the supply and most of the trading tax, shared by '
               'days shown up.',
-          'Launch: once the group has 3 check-ins, anyone can launch the '
-              'token.',
+          'Launch needs both: 3 check-ins and 1,500 test USD in the '
+              'token pool.',
+          'Who launches: anyone, once both are there.',
           'No launch in 30 days: every deposit goes back.',
         ],
       );
       expect(
         NewRoundScreen.floorLine(deposit: 2000, bps: 10000),
-        'Flap needs 1,500 USD in the pool to launch: 1 person at this '
-        'deposit, or a sponsor.',
+        'Flap sets that pool floor. At this deposit it takes 1 person, or a '
+        'sponsor.',
       );
       expect(NewRoundScreen.membersForFloor(deposit: 100, bps: 1000), 150);
       // No percentages in the deal, and the token share is said at every
@@ -1448,6 +1807,82 @@ void main() {
           'Token: half the supply and most of the trading tax, shared by '
               'days shown up.',
         ], reason: '$bps');
+      }
+    });
+
+    test('the hint under the goal: days to fill, from the choices', () {
+      String hint(int deposit, int bps, int goal, int daysOpen) =>
+          NewRoundScreen.fillHint(
+            deposit: deposit,
+            bps: bps,
+            goal: goal,
+            daysOpen: daysOpen,
+          );
+      // The defaults: 5 people fill the floor, 6 check-ins take 2 days.
+      expect(
+        hint(1000, 3000, 6, 7),
+        'With 5 people checking in daily, this fills in about 2 days.',
+      );
+      // The floor needs 10 people at 500: they are who the hint counts.
+      expect(
+        hint(500, 3000, 12, 3),
+        'With 10 people checking in daily, this fills in about 2 days.',
+      );
+      // Fewer than 5 fill the floor: it still counts 5.
+      expect(
+        hint(2000, 5000, 30, 7),
+        'With 5 people checking in daily, this fills in about 6 days.',
+      );
+      expect(
+        hint(2000, 10000, 3, 30),
+        'With 5 people checking in daily, this fills in about 1 day.',
+      );
+      // Past the round's own length: it says so, on the same line.
+      expect(
+        hint(1000, 3000, 60, 7),
+        'With 5 people checking in daily, this fills in about 12 days, '
+        'longer than the round runs.',
+      );
+      // The arithmetic behind it: one check-in per person per day.
+      for (final goal in NewRoundScreen.goalOptions) {
+        for (final deposit in NewRoundScreen.depositOptions) {
+          for (final bps in NewRoundScreen.poolOptions) {
+            final people = NewRoundScreen.membersForFloor(
+              deposit: deposit,
+              bps: bps,
+            );
+            final n = people < 5 ? 5 : people;
+            expect(
+              hint(deposit, bps, goal, 30),
+              startsWith(
+                'With ${formatCount(n)} people checking in daily, this '
+                'fills in about ${days((goal / n).ceil())}',
+              ),
+            );
+          }
+        }
+      }
+    });
+
+    test('"Launch needs both" is its own line of the deal', () {
+      for (final goal in NewRoundScreen.goalOptions) {
+        final lines = NewRoundScreen.dealLines(
+          deposit: 1000,
+          bps: 3000,
+          goal: goal,
+          daysOpen: 7,
+        );
+        expect(
+          lines,
+          contains(
+            'Launch needs both: ${formatCount(goal)} check-ins and 1,500 '
+            'test USD in the token pool.',
+          ),
+        );
+        // Every amount in the deal is test money.
+        for (final line in lines) {
+          expect(line, isNot(matches(RegExp(r'\d USD'))), reason: line);
+        }
       }
     });
 
@@ -1530,15 +1965,17 @@ void main() {
 
       // The deal for the defaults, in money, one line each.
       for (final line in [
-        'Join: 1,000 USD each, paid once.',
-        'Prize: 700 USD of each deposit, shared by days shown up.',
-        'Token pool: 300 USD of each deposit.',
+        'Join: 1,000 test USD each, paid once.',
+        'Prize: 700 test USD of each deposit, shared by days shown up.',
+        'Token pool: 300 test USD of each deposit.',
         'Token: half the supply and most of the trading tax, shared by days '
             'shown up.',
-        'Launch: once the group has 6 check-ins, anyone can launch the token.',
+        'Launch needs both: 6 check-ins and 1,500 test USD in the '
+            'token pool.',
+        'Who launches: anyone, once both are there.',
         'No launch in 7 days: every deposit goes back.',
-        'Flap needs 1,500 USD in the pool to launch: 5 people at this '
-            'deposit, or a sponsor.',
+        'Flap sets that pool floor. At this deposit it takes 5 people, or a '
+            'sponsor.',
       ]) {
         expect(find.text(line), findsOneWidget, reason: line);
       }
@@ -1585,7 +2022,7 @@ void main() {
       );
       expect(
         find.bySemanticsLabel(
-          RegExp(r'^THE DEAL\nJoin: 1,000 USD each, paid once\.\n'),
+          RegExp(r'^THE DEAL\nJoin: 1,000 test USD each, paid once\.\n'),
         ),
         findsOneWidget,
       );
@@ -1594,8 +2031,8 @@ void main() {
       await settle(tester);
       expect(
         find.text(
-          'Launch: once the group has 12 check-ins, anyone can launch the '
-          'token.',
+          'Launch needs both: 12 check-ins and 1,500 test USD in the token '
+          'pool.',
         ),
         findsOneWidget,
       );
@@ -1634,20 +2071,41 @@ void main() {
       final state = await makeState();
       await pumpBody(tester, NewRoundScreen(state: state, missing: const []));
 
+      final hint = find.byKey(const Key('round-goal-hint'));
+      expect(
+        tester.widget<Text>(hint).data,
+        'With 5 people checking in daily, this fills in about 2 days.',
+      );
       await pick(tester, 'round-deposit', '500');
       await pick(tester, 'round-goal', '12');
       await pick(tester, 'round-days', '3 days');
+      // The hint follows the choices, on one line under the goal's chips.
+      expect(
+        tester.widget<Text>(hint).data,
+        'With 10 people checking in daily, this fills in about 2 days.',
+      );
+      expect(
+        tester.getRect(hint).top,
+        greaterThanOrEqualTo(
+          tester.getRect(find.byKey(const Key('round-goal'))).bottom,
+        ),
+      );
+      expect(
+        tester.getRect(hint).bottom,
+        lessThanOrEqualTo(tester.getRect(find.text('RUNS FOR')).top),
+      );
       for (final line in [
-        'Join: 500 USD each, paid once.',
-        'Prize: 350 USD of each deposit, shared by days shown up.',
-        'Token pool: 150 USD of each deposit.',
+        'Join: 500 test USD each, paid once.',
+        'Prize: 350 test USD of each deposit, shared by days shown up.',
+        'Token pool: 150 test USD of each deposit.',
         'Token: half the supply and most of the trading tax, shared by days '
             'shown up.',
-        'Launch: once the group has 12 check-ins, anyone can launch the '
-            'token.',
+        'Launch needs both: 12 check-ins and 1,500 test USD in the '
+            'token pool.',
+        'Who launches: anyone, once both are there.',
         'No launch in 3 days: every deposit goes back.',
-        'Flap needs 1,500 USD in the pool to launch: 10 people at this '
-            'deposit, or a sponsor.',
+        'Flap sets that pool floor. At this deposit it takes 10 people, or a '
+            'sponsor.',
       ]) {
         expect(find.text(line), findsOneWidget, reason: line);
       }
@@ -1743,8 +2201,8 @@ void main() {
       );
       expect(
         find.text(
-          'Flap needs 1,500 USD in the pool to launch: 3 people at this '
-          'deposit, or a sponsor.',
+          'Flap sets that pool floor. At this deposit it takes 3 people, or a '
+          'sponsor.',
         ),
         findsOneWidget,
       );
@@ -1844,7 +2302,7 @@ void main() {
       await tabTo(tester, '500 test USD');
       await tester.sendKeyEvent(LogicalKeyboardKey.space);
       await settle(tester);
-      expect(find.text('Join: 500 USD each, paid once.'), findsOneWidget);
+      expect(find.text('Join: 500 test USD each, paid once.'), findsOneWidget);
 
       // "More options" opens, and what is in it is reached the same way.
       await tabTo(tester, 'More options');

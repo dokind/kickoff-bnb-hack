@@ -352,6 +352,25 @@ Map<String, dynamic> meJson({
   'claimedTokens': '0',
 };
 
+/// What GET /stats/:address answers: the totals across every round and the
+/// wallet's own.
+Map<String, dynamic> statsJson({
+  int people = 7,
+  int checkIns = 12,
+  String deposited = '5500',
+  int launched = 1,
+  bool complete = true,
+  Map<String, dynamic>? you = const {'rounds': 2, 'days': 4, 'claimed': '300'},
+}) => {
+  'rounds': 3,
+  'people': people,
+  'checkIns': checkIns,
+  'deposited': deposited,
+  'launched': launched,
+  'complete': complete,
+  'you': you,
+};
+
 /// The server, in memory. Tests change the answers and read what was asked.
 ///
 /// It knows every round in [more] besides its current one ([round]), each
@@ -389,6 +408,16 @@ class FakeServer {
     },
   ];
   final membersAt = <String, List<Map<String, dynamic>>>{};
+
+  /// The members lists are not answered until this completes.
+  Future<void>? membersGate;
+
+  /// The members lists answer this error (a sentence) with 503.
+  String? membersDown;
+
+  /// What GET /stats/:address answers. Null: this server does not keep
+  /// totals (404), as the one before it did not.
+  Map<String, dynamic>? stats;
   Map<String, dynamic> faucet = {'funded': true, 'bnbTx': '0xf1'};
 
   /// What POST /checkin answers; a status of 400 or more is an error body.
@@ -436,6 +465,20 @@ class FakeServer {
         checkInStatus,
       );
       final path = r.url.path;
+      if (path.endsWith('/members')) {
+        await membersGate;
+        if (membersDown != null) {
+          return json({
+            'error': 'chain_unavailable',
+            'message': membersDown,
+          }, 503);
+        }
+      }
+      if (path.startsWith('/stats/')) {
+        return stats == null || legacy
+            ? http.Response('404 Not Found', 404)
+            : json(stats!);
+      }
       switch (path) {
         case '/round':
           return round == null ? noRound : json(round!);

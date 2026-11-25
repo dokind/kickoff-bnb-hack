@@ -47,10 +47,14 @@ class RoundCardInfo {
 /// with page dots under them. The card in view is the selected round.
 ///
 /// The cards move on by themselves every [interval], but only until the
-/// person first touches them (or the screen around them, [touched]): from
-/// then on they stay where the person leaves them, so the round under the
-/// screen's one action never changes by itself once somebody is using the
-/// screen. A move that had just begun when the touch came is taken back.
+/// person first touches them (or the screen around them, [touched]), scrolls
+/// the page they are on (by any means: a finger, a wheel, the keyboard, a
+/// scroll bar), or opens anything over that page (a sheet, a dialog,
+/// another screen, however it was opened). From then on they stay where the
+/// person leaves them, for good, so the round under the screen's one action
+/// never changes by itself once somebody is using the screen. A move that
+/// had just begun when that happened is taken back. [onStopped] is told
+/// once, when they stop.
 /// They also do not move by themselves when [autoAdvance] is off, when the
 /// system or the browser asks for reduced motion, when a screen reader is
 /// on, while a mouse rests on them, or while [canAdvance] says no (and for
@@ -67,6 +71,7 @@ class RoundSlider extends StatefulWidget {
     required this.onInvite,
     this.canAdvance,
     this.autoAdvance = true,
+    this.onStopped,
     this.gutter = Space.gutter,
     this.interval = AppConfig.sliderInterval,
     this.hold = AppConfig.sliderHold,
@@ -89,6 +94,11 @@ class RoundSlider extends StatefulWidget {
   /// False: the cards never move by themselves (the person has already
   /// touched the screen in this session, or came by a round's link).
   final bool autoAdvance;
+
+  /// Told once, after the frame, when the cards stop moving by themselves
+  /// for good, whatever stopped them. Home passes the app state's
+  /// `stopAutoAdvance`, so a new slider (Home built again) stays still too.
+  final VoidCallback? onStopped;
 
   /// The screen's side margin. The slider itself is as wide as the screen,
   /// so a card being swiped leaves at the screen's edge, not at the margin.
@@ -139,14 +149,35 @@ class RoundSliderState extends State<RoundSlider> {
   @visibleForTesting
   bool get waiting => _timer != null;
 
+  /// The page the slider is on scrolls: a person is using the screen.
+  ScrollPosition? _page;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _watchPage(Scrollable.maybeOf(context)?.position);
+    // Something was opened over the screen (a sheet, a dialog, another
+    // screen), by a touch, the keyboard or the app itself.
+    if (ModalRoute.isCurrentOf(context) == false) {
+      touched();
+      return;
+    }
     final still = !context.motion || MediaQuery.accessibleNavigationOf(context);
     if (still != _still || _timer == null) {
       _still = still;
       _arm();
     }
+  }
+
+  void _watchPage(ScrollPosition? position) {
+    if (identical(position, _page)) return;
+    _page?.isScrollingNotifier.removeListener(_pageScrolled);
+    _page = position;
+    _page?.isScrollingNotifier.addListener(_pageScrolled);
+  }
+
+  void _pageScrolled() {
+    if (_page?.isScrollingNotifier.value ?? false) touched();
   }
 
   @override
@@ -230,7 +261,12 @@ class RoundSliderState extends State<RoundSlider> {
   /// again. If they had just begun to, they go back, so the selected round
   /// is still the one the person was looking at when they reached for it.
   void touched() {
-    _touched = true;
+    if (!_touched) {
+      _touched = true;
+      final told = widget.onStopped;
+      // Never during a build: the state it tells may rebuild the screen.
+      if (told != null) scheduleMicrotask(() => mounted ? told() : null);
+    }
     _timer?.cancel();
     _timer = null;
     if (_target != null && !_targetByPerson && _pages.hasClients) {
@@ -290,6 +326,7 @@ class RoundSliderState extends State<RoundSlider> {
 
   @override
   void dispose() {
+    _watchPage(null);
     _timer?.cancel();
     _pages.dispose();
     super.dispose();
@@ -450,7 +487,9 @@ class RoundCard extends StatelessWidget {
           '${info.joined ? 'You\'re in. ' : ''}'
           '${round.unlisted ? 'Unlisted. ' : ''}',
       child: GlassCard(
-        padding: const EdgeInsets.fromLTRB(18, 14, 14, 16),
+        // The top edge is 6 closer than the others: the "Invite" row is a
+        // full touch target, 6 taller above and below the chip it draws.
+        padding: const EdgeInsets.fromLTRB(18, 8, 14, 16),
         tint: info.joined ? c.volt.withValues(alpha: 0.28) : null,
         // Never an overflow stripe, however large the text is set.
         child: SingleChildScrollView(
@@ -470,18 +509,24 @@ class RoundCard extends StatelessWidget {
                     label: 'Invite to ${round.name}',
                     excludeSemantics: true,
                     child: GestureDetector(
+                      key: const Key('round-invite'),
                       behavior: HitTestBehavior.opaque,
                       onTap: onInvite,
-                      child: const AppChip(
-                        text: 'Invite',
-                        icon: Icons.ios_share_rounded,
-                        height: 32,
+                      // A 32-high chip in a touch target of [Sizes.touch].
+                      child: const SizedBox(
+                        height: Sizes.touch,
+                        child: Center(
+                          child: AppChip(
+                            text: 'Invite',
+                            icon: Icons.ios_share_rounded,
+                            height: 32,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
               Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Text(
@@ -522,7 +567,7 @@ class RoundCard extends StatelessWidget {
                   ],
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               const Overline('The bar'),
               const SizedBox(height: 6),
               Padding(

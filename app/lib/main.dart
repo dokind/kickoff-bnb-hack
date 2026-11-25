@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'app_state.dart';
@@ -7,8 +9,18 @@ import 'router.dart';
 import 'theme/theme.dart';
 import 'widgets/common.dart';
 
+/// Kept for the life of the app: while it is held the web build keeps its
+/// accessibility tree on, so screen readers and accessibility tools see
+/// every screen without the visitor first turning it on.
+SemanticsHandle? webSemantics;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kIsWeb) webSemantics = SemanticsBinding.instance.ensureSemantics();
+  // Find the server (OriginRegistry on chain, or the host kept from the last
+  // visit) before the first call. Bounded: a slow RPC leaves the app on the
+  // page's splash for a few seconds at most, never on a black screen.
+  await AppConfig.resolveServer();
   final state = AppState();
   await state.init();
   final theme = buildTheme();

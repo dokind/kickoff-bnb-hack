@@ -1,11 +1,12 @@
 {
     "name": "Cypher Run",
     "short_name": "Cypher Run",
-    "start_url": ".",
+    "start_url": "./",
+    "scope": "./",
     "display": "standalone",
     "background_color": "#0A0E11",
     "theme_color": "#0A0E11",
-    "description": "A discipline app with money on it. BNB Smart Chain testnet.",
+    "description": "Pay in. Show up each day. Split the prize. BNB Smart Chain testnet, test USD only.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

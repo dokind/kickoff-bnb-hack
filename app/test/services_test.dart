@@ -495,41 +495,161 @@ void main() {
   });
 
   group('config', () {
-    test('the web build calls the API on its own origin under /api', () {
+    test('the server address: build value, tunnel page, chain, none', () {
+      // (a) VERIFIER_URL wins, on a phone and on a page served from here.
       expect(
         AppConfig.apiBaseFor(
-          define: '',
-          web: true,
-          pageOrigin: 'https://cypherrun.example',
+          define: 'https://x.example/api/',
+          web: false,
+          pageOrigin: '',
+          originHost: 'chain.example',
         ),
-        'https://cypherrun.example/api',
-      );
-      // A build value pointing at this machine is never used by a hosted page.
-      expect(
-        AppConfig.apiBaseFor(
-          define: 'http://localhost:8787',
-          web: true,
-          pageOrigin: 'https://cypherrun.example',
-        ),
-        'https://cypherrun.example/api',
+        'https://x.example/api',
       );
       expect(
         AppConfig.apiBaseFor(
           define: 'http://localhost:8787/',
           web: true,
           pageOrigin: 'http://localhost:5000',
+          originHost: 'chain.example',
         ),
         'http://localhost:8787',
       );
+      // A build value pointing at this machine is never used by a hosted
+      // page: it falls through to the chain.
       expect(
         AppConfig.apiBaseFor(
-          define: 'https://x.example/api/',
+          define: 'http://localhost:8787',
+          web: true,
+          pageOrigin: 'https://dokind.github.io',
+          originHost: 'chain.example',
+        ),
+        'https://chain.example/api',
+      );
+      // (b) A page served through a quick tunnel (an old link) calls the
+      // server behind that tunnel.
+      expect(
+        AppConfig.apiBaseFor(
+          define: '',
+          web: true,
+          pageOrigin: 'https://old-name.trycloudflare.com',
+          originHost: 'new-name.trycloudflare.com',
+        ),
+        'https://old-name.trycloudflare.com/api',
+      );
+      // (c) Otherwise the host OriginRegistry holds.
+      expect(
+        AppConfig.apiBaseFor(
+          define: '',
+          web: true,
+          pageOrigin: 'https://dokind.github.io',
+          originHost: 'new-name.trycloudflare.com',
+        ),
+        'https://new-name.trycloudflare.com/api',
+      );
+      expect(
+        AppConfig.apiBaseFor(
+          define: '',
           web: false,
           pageOrigin: '',
+          originHost: 'new-name.trycloudflare.com',
         ),
-        'https://x.example/api',
+        'https://new-name.trycloudflare.com/api',
       );
+      // The GitHub Pages site itself serves no API.
+      expect(
+        AppConfig.apiBaseFor(
+          define: '',
+          web: true,
+          pageOrigin: 'https://dokind.github.io',
+        ),
+        '',
+      );
+      // A host that is not a plain host name is never used.
+      expect(
+        AppConfig.apiBaseFor(
+          define: '',
+          web: false,
+          pageOrigin: '',
+          originHost: 'evil.com/path',
+        ),
+        '',
+      );
+      // (d) Nothing known: no address.
       expect(AppConfig.apiBaseFor(define: '', web: false, pageOrigin: ''), '');
+    });
+
+    test('the site address: build value, page address, permanent site', () {
+      expect(
+        AppConfig.webBaseFor(
+          define: 'https://run.example/',
+          web: true,
+          pageOrigin: 'https://other.example',
+          pagePath: '/',
+        ),
+        'https://run.example',
+      );
+      // GitHub Pages serves the app under the repository's path.
+      expect(
+        AppConfig.webBaseFor(
+          define: '',
+          web: true,
+          pageOrigin: 'https://dokind.github.io',
+          pagePath: '/kickoff-bnb-hack/',
+        ),
+        'https://dokind.github.io/kickoff-bnb-hack',
+      );
+      expect(
+        AppConfig.webBaseFor(
+          define: '',
+          web: true,
+          pageOrigin: 'https://dokind.github.io',
+          pagePath: '/kickoff-bnb-hack/index.html',
+        ),
+        'https://dokind.github.io/kickoff-bnb-hack',
+      );
+      // A quick tunnel's host changes when it restarts: links from there
+      // point at the permanent site.
+      expect(
+        AppConfig.webBaseFor(
+          define: '',
+          web: true,
+          pageOrigin: 'https://old-name.trycloudflare.com',
+          pagePath: '/',
+        ),
+        AppConfig.siteUrl,
+      );
+      // A phone build made without WEB_BASE_URL hands out the permanent site.
+      expect(
+        AppConfig.webBaseFor(
+          define: '',
+          web: false,
+          pageOrigin: '',
+          pagePath: '',
+        ),
+        'https://dokind.github.io/kickoff-bnb-hack',
+      );
+    });
+
+    test('an invite link under a path base has one slash and #/r/', () {
+      const site = 'https://dokind.github.io/kickoff-bnb-hack';
+      const expected =
+          'https://dokind.github.io/kickoff-bnb-hack/#/r/'
+          '0xabcdef0000000000000000000000000000000001';
+      for (final base in [site, '$site/', '$site//']) {
+        expect(
+          AppConfig.inviteLinkFor(
+            base,
+            '0xABCDEF0000000000000000000000000000000001',
+          ),
+          expected,
+        );
+      }
+      expect(AppConfig.inviteLinkFor(site, launcher), isNot(contains('//#')));
+      expect(
+        AppConfig.launcherFromLink(AppConfig.inviteLinkFor(site, launcherB)),
+        launcherB,
+      );
     });
 
     test('missing build values are named by their --dart-define', () {
@@ -559,7 +679,53 @@ void main() {
         AppConfig.quoteToken,
         '0x190C989D5665a0e404B444b53CAE9AbCfb600157',
       );
-      expect(AppConfig.flapToken, 'https://flap.sh/bnb-testnet/');
+      expect(AppConfig.flapToken, 'https://abc.flap.sh/bnb-testnet/');
+    });
+  });
+
+  group('stats amounts', () {
+    test('deposited and claimed are read from raw (exact base units)', () {
+      final stats = Stats.fromJson({
+        'people': 3,
+        'checkIns': 9,
+        // 16 digits of whole test USD: the decimal string alone used to be
+        // misread as base units.
+        'deposited': '1234567890123456',
+        'launched': 1,
+        'raw': {'deposited': '1234567890123456000000000000000000'},
+        'you': {
+          'rounds': 1,
+          'days': 2,
+          'claimed': '0.019',
+          'raw': {'claimed': '19000000000000000'},
+        },
+      });
+      expect(stats.deposited, BigInt.parse('1234567890123456') * usd(1));
+      expect(stats.you!.claimed, BigInt.parse('19000000000000000'));
+    });
+
+    test('without raw, the decimal string is whole units', () {
+      final stats = Stats.fromJson({
+        'deposited': '1234567890123456',
+        'you': {'rounds': 1, 'days': 2, 'claimed': '411.16'},
+      });
+      expect(stats.deposited, BigInt.parse('1234567890123456') * usd(1));
+      expect(stats.you!.claimed, usd(411.16));
+      // A raw value that is not digits is ignored.
+      expect(
+        exactAmountFromJson({
+          'deposited': '5500',
+          'raw': {'deposited': '5.5e21'},
+        }, 'deposited'),
+        usd(5500),
+      );
+      expect(exactAmountFromJson({}, 'deposited'), BigInt.zero);
+      expect(
+        exactAmountFromJson({
+          'raw': {'deposited': '0'},
+        }, 'deposited'),
+        BigInt.zero,
+      );
     });
   });
 

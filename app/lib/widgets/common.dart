@@ -3,6 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../config.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
@@ -141,47 +142,105 @@ class _BannerHostState extends State<BannerHost>
       TweenSequenceItem(tween: ConstantTween(1.0), weight: 88),
       TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 6),
     ]).animate(_life);
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(Space.gutter, 6, Space.gutter, 0),
-        child: FadeTransition(
-          opacity: shown,
-          child: SlideTransition(
-            position: Tween(
-              begin: const Offset(0, -0.4),
-              end: Offset.zero,
-            ).animate(shown),
-            child: Semantics(
-              liveRegion: true,
-              child: GestureDetector(
-                onTap: () => bannerNote.value = null,
-                child: GlassSurface(
-                  radius: 26,
-                  tint: c.ink.withValues(alpha: 1),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 14,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(icon, size: 20, color: colour),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            note.text,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: context.type.body(14, FontWeight.w500),
+    // The banner sits above the router's Navigator, so no Scaffold is
+    // around it: without a Material of its own its words would be drawn in
+    // Flutter's fallback style, with the yellow debug underline.
+    return Material(
+      type: MaterialType.transparency,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(Space.gutter, 6, Space.gutter, 0),
+          child: FadeTransition(
+            opacity: shown,
+            child: SlideTransition(
+              position: Tween(
+                begin: const Offset(0, -0.4),
+                end: Offset.zero,
+              ).animate(shown),
+              child: Semantics(
+                liveRegion: true,
+                child: GestureDetector(
+                  onTap: () => bannerNote.value = null,
+                  child: GlassSurface(
+                    radius: 26,
+                    tint: c.ink.withValues(alpha: 1),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 14,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(icon, size: 20, color: colour),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              note.text,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: context.type
+                                  .body(14, FontWeight.w500)
+                                  .copyWith(decoration: TextDecoration.none),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Test money ------------------------------------------------------------------
+
+/// How the app writes the quote token in sentences about deposits: it is
+/// Flap's free test USD on BSC testnet, never a real dollar.
+const String testUsd = 'test ${AppConfig.quoteSymbol}';
+
+/// An amount of the quote token as test money: "1,000 test USD".
+String formatTestUsd(BigInt value, {int maxFraction = 2}) =>
+    formatMoney(value, testUsd, maxFraction: maxFraction);
+
+/// The small permanent "TESTNET" capsule. Home's header shows it under the
+/// greeting, beside the round count, so no amount on the screen reads as
+/// real money. It is a label, not a control.
+class TestnetPill extends StatelessWidget {
+  const TestnetPill({super.key, this.height = 24});
+
+  /// 20 fits inside one line of 14px body text, so a header row does not
+  /// grow when it carries the pill.
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Semantics(
+      label: 'Testnet. Test money only, no real value.',
+      excludeSemantics: true,
+      child: Container(
+        key: const Key('testnet-pill'),
+        height: height,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: ShapeDecoration(
+          color: Colors.white.withValues(alpha: 0.08),
+          shape: StadiumBorder(side: BorderSide(color: c.hairline)),
+        ),
+        // widthFactor 1: the pill is as wide as its word, never the row.
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            'TESTNET',
+            maxLines: 1,
+            style: context.type
+                .body(12, FontWeight.w600)
+                .copyWith(color: c.text2, height: 1, letterSpacing: 1),
           ),
         ),
       ),

@@ -15,6 +15,8 @@
 		}
 	}
 
+	# The web app is served from GitHub Pages and reads this server's host from the OriginRegistry.
+	# A copy of the web build in ./web is still served here at the tunnel's own address.
 	handle {
 		root * /srv/web
 		# Flutter web file names are not hashed (main.dart.js, flutter_bootstrap.js, assets/...),

@@ -39,3 +39,5 @@ scripts/*-result.json
 
 # Flap media kit originals: link to the source instead of redistributing
 app/assets/brand/original/
+
+.vercel/

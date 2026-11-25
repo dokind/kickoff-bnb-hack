@@ -1,10 +1,22 @@
 // Chain access with viem: reads of a round (CheckInLauncher and, after the launch, its
-// StreakVault), the factory's creation events (which rounds exist), and the faucet's gas transfers.
-// BSC testnet only.
+// StreakVault), the factory's creation events (which rounds exist), the faucet's gas transfers and
+// the OriginRegistry (where this server can be reached). BSC testnet only.
 //
 // This server sends no transaction to the Launcher or the vault. Members send join, checkIn,
-// launch, refund and claim themselves; the only transactions sent from here are the faucet's.
-import { createPublicClient, createWalletClient, http, parseAbi, zeroAddress } from "viem";
+// launch, refund and claim themselves; the only transactions sent from here are the faucet's
+// transfers and OriginRegistry.setOrigin.
+import {
+  TransactionReceiptNotFoundError,
+  createPublicClient,
+  createWalletClient,
+  http,
+  parseAbi,
+  zeroAddress,
+  type PrivateKeyAccount,
+  type PublicClient,
+  type Transport,
+  type WalletClient,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { bscTestnet } from "viem/chains";
 import type { CreatedRound } from "./types.js";
@@ -15,6 +27,8 @@ type Address = `0x${string}`;
 // gets mined. Every transaction is sent as a legacy one at a fixed 1 gwei with an explicit gas limit.
 const TESTNET_GAS_PRICE = 1_000_000_000n;
 const TRANSFER_GAS = 21_000n;
+/** setOrigin writes a short string and a timestamp: well under this. */
+const ORIGIN_GAS = 200_000n;
 const NONCE_MEMORY_MS = 60_000;
 
 // Minimal fragments for the functions this server reads (full ABIs live in ../contracts/abi).
@@ -49,6 +63,12 @@ export const vaultAbi = parseAbi([
   "function claimedQuote(address member) view returns (uint256)",
 ]);
 export const tokenAbi = parseAbi(["function decimals() view returns (uint8)"]);
+/** contracts/src/OriginRegistry.sol: the server's current host, set by the attester key only. */
+export const registryAbi = parseAbi([
+  "function announcer() view returns (address)",
+  "function origin() view returns (string)",
+  "function setOrigin(string origin_)",
+]);
 /** Emitted once by CheckInLauncherFactory for every round it creates. `creator` is the wallet that
  *  called the Flap Portal. */
 export const factoryAbi = parseAbi(["event CheckInLauncherCreated(address indexed launcher, address indexed creator, bytes32 launchSalt)"]);
@@ -102,9 +122,12 @@ export interface ClaimState {
   tokenDecimals: number;
 }
 
-/** Sends gas money from the server wallet. Present only with a key. */
+/** Sends gas money from the faucet's wallet: FAUCET_PRIVATE_KEY's when set, otherwise the
+ *  attester's. Present only with a key. */
 export interface FaucetWallet {
-  /** Test BNB the server wallet holds. */
+  /** The wallet's address, lower-case. */
+  address: string;
+  /** Test BNB the wallet holds. */
   balance(): Promise<bigint>;
   sendBnb(to: string, wei: bigint): Promise<string>;
 }
@@ -120,6 +143,25 @@ export interface FactoryLogs {
   created(fromBlock: number, toBlock: number): Promise<CreatedRound[]>;
 }
 
+/** A transaction's state as the RPC reports it. */
+export type TxStatus = "pending" | "success" | "reverted";
+
+/** The OriginRegistry. Present only with a registry address and the attester key. */
+export interface OriginRegistryChain {
+  /** The registry's address, lower-case. */
+  address: string;
+  /** The wallet that sends setOrigin (the attester), lower-case. */
+  sender: string;
+  /** The one address the registry accepts setOrigin from, lower-case. */
+  announcer(): Promise<string>;
+  /** origin() as stored now ("" before the first setOrigin). */
+  read(): Promise<string>;
+  /** Sends setOrigin(host) from the attester key and returns the transaction hash once submitted. */
+  announce(host: string): Promise<`0x${string}`>;
+  /** "pending" while the RPC has no receipt for `hash`. */
+  status(hash: `0x${string}`): Promise<TxStatus>;
+}
+
 export interface Chain {
   round(launcher: string): Promise<RoundState>;
   member(launcher: string, address: string, dayIndex: number): Promise<MemberState>;
@@ -130,13 +172,25 @@ export interface Chain {
   balanceOf(address: string): Promise<bigint>;
   faucet?: FaucetWallet;
   factory?: FactoryLogs;
+  origin?: OriginRegistryChain;
+}
+
+export interface ChainOptions {
+  /** FAUCET_PRIVATE_KEY: the faucet pays from this key instead of the attester key. */
+  faucetKey?: string;
+  /** ORIGIN_REGISTRY: the OriginRegistry this server writes its host to (needs the attester key). */
+  originRegistry?: string;
 }
 
 const lower = (address: string) => address.toLowerCase();
 const orNull = (address: string) => (address === zeroAddress ? null : lower(address));
 
-/** `factory` is the address of our CheckInLauncherFactory; without it no rounds are discovered. */
-export function createChain(rpcUrl: string, privateKey?: string, factory?: string): Chain {
+/**
+ * `privateKey` is the attester key. `factory` is the address of our CheckInLauncherFactory; without
+ * it no rounds are discovered. The faucet pays from `options.faucetKey` when given, otherwise from
+ * the attester key; setOrigin is always sent from the attester key.
+ */
+export function createChain(rpcUrl: string, privateKey?: string, factory?: string, options: ChainOptions = {}): Chain {
   const transport = http(rpcUrl);
   const client = createPublicClient({ chain: bscTestnet, transport });
   // A Launcher's configuration is set once at creation, so it is read once per round.
@@ -282,14 +336,72 @@ export function createChain(rpcUrl: string, privateKey?: string, factory?: strin
       },
     };
   }
-  if (!privateKey) return reads;
+  // Each key has its own wallet and its own queue. The same key given twice is one wallet, so its
+  // transactions still share one queue and one nonce count.
+  const wallets = new Map<string, ServerWallet>();
+  const walletOf = (key: string): ServerWallet => {
+    const address = lower(privateKeyToAccount(key as Address).address);
+    let found = wallets.get(address);
+    if (!found) {
+      found = serverWallet(client, transport, key as Address);
+      wallets.set(address, found);
+    }
+    return found;
+  };
+  const signer = privateKey ? walletOf(privateKey) : undefined;
+  const payer = options.faucetKey ? walletOf(options.faucetKey) : signer;
+  const legacy = { type: "legacy", gasPrice: TESTNET_GAS_PRICE } as const;
 
-  const account = privateKeyToAccount(privateKey as Address);
+  const chain: Chain = { ...reads };
+  if (payer) {
+    chain.faucet = {
+      address: payer.address,
+      balance: () => client.getBalance({ address: payer.address as Address }),
+      sendBnb: (to, wei) =>
+        payer.send((nonce) => payer.wallet.sendTransaction({ to: to as Address, value: wei, ...legacy, gas: TRANSFER_GAS, nonce })),
+    };
+  }
+  if (options.originRegistry && signer) {
+    const registry = lower(options.originRegistry) as Address;
+    const read = { address: registry, abi: registryAbi } as const;
+    chain.origin = {
+      address: registry,
+      sender: signer.address,
+      announcer: async () => lower(await client.readContract({ ...read, functionName: "announcer" })),
+      read: () => client.readContract({ ...read, functionName: "origin" }),
+      announce: (host) =>
+        signer.send((nonce) =>
+          signer.wallet.writeContract({ ...read, functionName: "setOrigin", args: [host], ...legacy, gas: ORIGIN_GAS, nonce }),
+        ),
+      status: async (hash) => {
+        try {
+          const receipt = await client.getTransactionReceipt({ hash });
+          return receipt.status === "success" ? "success" : "reverted";
+        } catch (e) {
+          if (e instanceof TransactionReceiptNotFoundError) return "pending";
+          throw e;
+        }
+      },
+    };
+  }
+  return chain;
+}
+
+interface ServerWallet {
+  /** Lower-case. */
+  address: string;
+  wallet: WalletClient<Transport, typeof bscTestnet, PrivateKeyAccount>;
+  /** Sends one transaction built with the given nonce, after every earlier one of this wallet. */
+  send(tx: (nonce: number) => Promise<`0x${string}`>): Promise<`0x${string}`>;
+}
+
+function serverWallet(client: PublicClient<Transport, typeof bscTestnet>, transport: Transport, key: Address): ServerWallet {
+  const account = privateKeyToAccount(key);
   const wallet = createWalletClient({ account, chain: bscTestnet, transport });
 
-  // Every transaction of the server wallet goes through this queue, one at a time, each with an
-  // explicit nonce. A load-balanced public RPC can answer a "pending" count before it has seen the
-  // transaction sent just before, so two transfers in a row would otherwise reuse a nonce.
+  // Every transaction of this wallet goes through this queue, one at a time, each with an explicit
+  // nonce. A load-balanced public RPC can answer a "pending" count before it has seen the
+  // transaction sent just before, so two transactions in a row would otherwise reuse a nonce.
   let queue: Promise<unknown> = Promise.resolve();
   let nextNonce = 0;
   let lastSent = 0;
@@ -306,13 +418,5 @@ export function createChain(rpcUrl: string, privateKey?: string, factory?: strin
     queue = run.catch(() => undefined);
     return run;
   }
-  const legacy = { type: "legacy", gasPrice: TESTNET_GAS_PRICE } as const;
-
-  return {
-    ...reads,
-    faucet: {
-      balance: () => client.getBalance({ address: account.address }),
-      sendBnb: (to, wei) => send((nonce) => wallet.sendTransaction({ to: to as Address, value: wei, ...legacy, gas: TRANSFER_GAS, nonce })),
-    },
-  };
+  return { address: lower(account.address), wallet, send };
 }

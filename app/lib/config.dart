@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import 'services/origin_service.dart';
+
 /// Every name, address, chain id, gas limit and URL the app uses lives here.
 class AppConfig {
   /// The product's name. The one place the app spells it: screens,
@@ -22,67 +24,154 @@ class AppConfig {
     'https://data-seed-prebsc-1-s1.bnbchain.org:8545',
   ];
 
-  /// The server (see ../verifier), set at build time with
-  /// `--dart-define=VERIFIER_URL=https://...`. Phone builds need it. The web
-  /// build does not: it calls the API on the address it is served from, under
-  /// `/api`.
+  /// The server (see ../verifier) at a fixed address, set at build time with
+  /// `--dart-define=VERIFIER_URL=https://...`. For local development and
+  /// tests; a release build leaves it empty and finds the server on chain
+  /// (see [originRegistry]).
   static const String verifierUrlDefine = String.fromEnvironment(
     'VERIFIER_URL',
   );
 
-  /// Base URL of every server call, without a trailing slash. Empty when a
-  /// phone build was made without VERIFIER_URL.
+  /// OriginRegistry on BSC testnet (../contracts/src/OriginRegistry.sol).
+  /// The server writes its current host here whenever it moves; the apps
+  /// read it with OriginService before their first call.
+  static const String originRegistry =
+      '0xb9aD45Dc177C801f10670F2aac03B467f1C367d2';
+
+  /// Base URL of every server call, without a trailing slash. Empty when the
+  /// server's address is not known yet.
   static String get verifierBaseUrl => apiBaseFor(
     define: verifierUrlDefine,
     web: kIsWeb,
     pageOrigin: kIsWeb ? Uri.base.origin : '',
+    originHost: OriginService.instance.host,
   );
 
-  /// [verifierBaseUrl] for any set of values, so tests can check it.
+  /// [verifierBaseUrl] for any set of values, so tests can check it. In
+  /// order:
   ///
-  /// On the web the default is the page's own origin plus `/api`. A
-  /// VERIFIER_URL that points at this machine (localhost) is only used when
-  /// the page itself is served from this machine: a hosted site must never
-  /// send people's browsers to their own localhost.
+  /// 1. VERIFIER_URL, when set. One that points at this machine (localhost)
+  ///    is only used when the page itself is served from this machine: a
+  ///    hosted site must never send people's browsers to their own
+  ///    localhost.
+  /// 2. On the web, a page served through a Cloudflare quick tunnel
+  ///    (`*.trycloudflare.com`, the links handed out before the site moved):
+  ///    the page's own origin plus `/api`, the server behind that tunnel.
+  /// 3. [originHost], the host OriginRegistry holds (read this run, else the
+  ///    one kept on the device): `https://<host>/api`.
+  /// 4. Empty: the app says it has no server address yet.
   static String apiBaseFor({
     required String define,
     required bool web,
     required String pageOrigin,
+    String originHost = '',
   }) {
-    final url = define.trim().replaceFirst(RegExp(r'/+$'), '');
-    if (!web) return url;
-    final sameOrigin = '${pageOrigin.replaceFirst(RegExp(r'/+$'), '')}/api';
-    if (url.isEmpty) return sameOrigin;
-    if (_isLocal(url) && !_isLocal(pageOrigin)) return sameOrigin;
-    return url;
+    final url = _trim(define);
+    if (url.isNotEmpty && !(web && _isLocal(url) && !_isLocal(pageOrigin))) {
+      return url;
+    }
+    if (web && _isTunnel(pageOrigin)) return '${_trim(pageOrigin)}/api';
+    final host = originHost.trim().toLowerCase();
+    if (OriginService.isValidHost(host)) {
+      return OriginService.apiBaseForHost(host);
+    }
+    return '';
   }
+
+  /// True when [verifierBaseUrl] does not depend on the chain, so there is
+  /// nothing to look up.
+  static bool get _fixedServer => apiBaseFor(
+    define: verifierUrlDefine,
+    web: kIsWeb,
+    pageOrigin: kIsWeb ? Uri.base.origin : '',
+  ).isNotEmpty;
+
+  /// Finds the server before the first screen: reads the host kept on the
+  /// device and OriginRegistry. Bounded by the origin lookup's timeout, so a
+  /// slow RPC cannot hold the app on its splash.
+  static Future<void> resolveServer() async {
+    if (_fixedServer) return;
+    final origin = OriginService.instance;
+    try {
+      await origin.resolve().timeout(
+        origin.timeout + const Duration(seconds: 1),
+      );
+    } catch (_) {
+      // Start with whatever is known; a failed call looks again.
+    }
+  }
+
+  /// Looks the server up again after a call could not reach it, and returns
+  /// the base URL to try next (the same one when nothing changed).
+  static Future<String> refreshVerifierBaseUrl() async {
+    if (!_fixedServer) {
+      final origin = OriginService.instance;
+      try {
+        await origin.refresh().timeout(
+          origin.timeout + const Duration(seconds: 1),
+        );
+      } catch (_) {}
+    }
+    return verifierBaseUrl;
+  }
+
+  static String _trim(String url) =>
+      url.trim().replaceFirst(RegExp(r'/+$'), '');
 
   static bool _isLocal(String url) {
     final host = Uri.tryParse(url)?.host ?? '';
     return host == 'localhost' || host == '127.0.0.1' || host == '::1';
   }
 
+  static bool _isTunnel(String url) {
+    final host = (Uri.tryParse(url.trim())?.host ?? '').toLowerCase();
+    return host.endsWith('.trycloudflare.com');
+  }
+
+  /// The web app's permanent address (GitHub Pages), without a trailing
+  /// slash.
+  static const String siteUrl = 'https://dokind.github.io/kickoff-bnb-hack';
+
   /// Where the web build of this app is served, without a trailing slash:
   /// the start of every round's invite link. Set it at build time with
-  /// `--dart-define=WEB_BASE_URL=https://...`. When it is not set, the web
-  /// build uses the address it is served from and a phone build has no link
-  /// to hand out.
+  /// `--dart-define=WEB_BASE_URL=https://...`.
   static const String webBaseUrlDefine = String.fromEnvironment('WEB_BASE_URL');
 
-  static String get webBaseUrl {
-    var url = webBaseUrlDefine;
-    if (url.isEmpty && kIsWeb) url = Uri.base.origin + Uri.base.path;
-    return url.replaceFirst(RegExp(r'/+$'), '');
+  static String get webBaseUrl => webBaseFor(
+    define: webBaseUrlDefine,
+    web: kIsWeb,
+    pageOrigin: kIsWeb ? Uri.base.origin : '',
+    pagePath: kIsWeb ? Uri.base.path : '',
+  );
+
+  /// [webBaseUrl] for any set of values, so tests can check it. WEB_BASE_URL
+  /// when set; else, on the web, the address the page is served from (with
+  /// its path, so a site under a path such as GitHub Pages keeps it), except
+  /// a quick tunnel's, whose host changes when the tunnel restarts; else
+  /// [siteUrl].
+  static String webBaseFor({
+    required String define,
+    required bool web,
+    required String pageOrigin,
+    required String pagePath,
+  }) {
+    final set = _trim(define);
+    if (set.isNotEmpty) return set;
+    if (web && pageOrigin.trim().isNotEmpty && !_isTunnel(pageOrigin)) {
+      final path = pagePath.replaceFirst(RegExp(r'index\.html$'), '');
+      return _trim('${_trim(pageOrigin)}$path');
+    }
+    return siteUrl;
   }
 
   /// A round's link: `<webBaseUrl>/#/r/<launcher>`. Opening it selects that
-  /// round, listed or not. Empty when the build has no web address.
+  /// round, listed or not.
   static String inviteLink(String launcher) =>
       inviteLinkFor(webBaseUrl, launcher);
 
   /// [inviteLink] for any base, so tests can check it.
   static String inviteLinkFor(String base, String launcher) {
-    final b = base.trim().replaceFirst(RegExp(r'/+$'), '');
+    final b = _trim(base);
     return b.isEmpty ? '' : '$b/#/r/${launcher.toLowerCase()}';
   }
 
@@ -180,7 +269,7 @@ class AppConfig {
   static const String explorerToken = 'https://testnet.bscscan.com/token/';
 
   /// A token's page on Flap (testnet): this plus the token address.
-  static const String flapToken = 'https://flap.sh/bnb-testnet/';
+  static const String flapToken = 'https://abc.flap.sh/bnb-testnet/';
 
   /// Every transaction is a legacy one at this gas price with an explicit
   /// gas limit. Fee estimation on BSC testnet answers 1 wei, and a

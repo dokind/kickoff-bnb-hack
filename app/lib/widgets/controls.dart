@@ -26,6 +26,7 @@ class Pressable extends StatefulWidget {
     this.link = false,
     this.selected,
     this.toggled,
+    this.expanded,
     this.onDown,
   });
 
@@ -47,6 +48,9 @@ class Pressable extends StatefulWidget {
   final bool link;
   final bool? selected;
   final bool? toggled;
+
+  /// For a control that opens and closes something: whether it is open.
+  final bool? expanded;
 
   /// Told while a finger or the mouse button is down on it.
   final ValueChanged<bool>? onDown;
@@ -71,6 +75,7 @@ class _PressableState extends State<Pressable> {
       enabled: widget.button ? can : null,
       selected: widget.selected,
       toggled: widget.toggled,
+      expanded: widget.expanded,
       label: widget.label,
       // The detector's focus and the gesture's tap action join this node.
       child: FocusableActionDetector(
