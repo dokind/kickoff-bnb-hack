@@ -1,0 +1,30 @@
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	encode zstd gzip
+
+	# API: same origin, /api prefix stripped. Only the Cloudflare tunnel can reach this server, so
+	# Cf-Connecting-Ip is the visitor's address; it becomes the single X-Forwarded-For value the
+	# verifier (TRUST_PROXY=true) uses for the faucet's per-address limit.
+	handle_path /api/* {
+		reverse_proxy verifier:8787 {
+			header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
+		}
+	}
+
+	handle {
+		root * /srv/web
+		# Flutter web file names are not hashed (main.dart.js, flutter_bootstrap.js, assets/...),
+		# so they must be revalidated or a redeploy would not reach phones. Only the versioned
+		# CanvasKit engine files are safe to cache for long.
+		@engine path /canvaskit/*
+		header @engine Cache-Control "public, max-age=604800"
+		@app not path /canvaskit/*
+		header @app Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

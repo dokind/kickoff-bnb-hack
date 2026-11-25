@@ -1,0 +1,16 @@
+# Compiler files
+cache/
+out/
+
+# Libraries: fetched by ./install-deps.sh at pinned versions
+lib/
+
+# Forge broadcast logs
+broadcast/
+
+# Secrets
+.env
+
+# Editor and OS noise
+.DS_Store
+.idea/

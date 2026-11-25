@@ -1,0 +1,30 @@
+{
+  "name": "cypher-run-verifier",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "start": "tsx --env-file-if-exists=.env src/server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "e2e:fork": "tsx test/e2e-fork.ts",
+    "build": "esbuild src/server.ts --bundle --splitting --platform=node --target=node22 --format=esm --packages=external --outdir=dist --out-extension:.js=.mjs",
+    "serve": "node dist/server.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.11",
+    "hono": "^4.13.22",
+    "viem": "^2.58.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.10",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}

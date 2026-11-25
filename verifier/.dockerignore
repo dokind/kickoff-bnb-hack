@@ -1,0 +1,9 @@
+# Keep secrets, local data and anything rebuilt inside the image out of the build context.
+.env
+.env.*
+!.env.example
+node_modules
+dist
+data
+test
+*.md

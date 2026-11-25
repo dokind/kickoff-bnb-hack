@@ -1,0 +1,50 @@
+# Pacepact hosting. Everything here belongs to the compose project "pacepact" and lives in
+# /opt/pacepact. It binds no host ports and joins no other project's network.
+name: pacepact
+
+services:
+  verifier:
+    build: ./verifier
+    image: pacepact-verifier:latest
+    env_file: ./verifier.env
+    volumes:
+      - data:/data
+    networks: [inner, egress]
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 1.0
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  caddy:
+    image: caddy:2-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv/web:ro
+    networks: [inner]
+    depends_on: [verifier]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *logging
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    command: tunnel --no-autoupdate --url http://caddy:80
+    networks: [inner, egress]
+    depends_on: [caddy]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *logging
+
+networks:
+  # No route to the internet or the host: the static server is reachable only by the tunnel.
+  inner:
+    internal: true
+  # Outbound only (BSC testnet RPC for the verifier, Cloudflare for the tunnel).
+  egress: {}
+
+volumes:
+  data: {}

@@ -1,0 +1,22 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+evm_version = "cancun"
+solc_version = "0.8.26"
+optimizer = true
+optimizer_runs = 99999
+fs_permissions = [
+    { access = "read", path = "./out" },
+    # script/Deploy.s.sol writes deployments/bsc-testnet.json when run with --broadcast
+    { access = "read-write", path = "./deployments" },
+]
+
+[lint]
+lint_on_build = false
+
+[fmt]
+line_length = 120
+
+[rpc_endpoints]
+bsc_testnet = "${BSC_TESTNET_RPC_URL}"

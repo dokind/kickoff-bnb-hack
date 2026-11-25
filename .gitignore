@@ -1,0 +1,41 @@
+# Secrets: never commit keys or filled-in env files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.keystore
+*.jks
+key.properties
+
+# Dependencies
+node_modules/
+contracts/lib/
+.dart_tool/
+.pub-cache/
+app/ios/Pods/
+app/.flutter-plugins-dependencies
+
+# Build output and caches
+dist/
+build/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+coverage/
+
+# Local data written by the verifier
+verifier/data/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+*.iml
+
+# Server details and local run state: not for the public repo
+HOSTING.md
+scripts/*-run.json
+scripts/*-result.json
+
+# Flap media kit originals: link to the source instead of redistributing
+app/assets/brand/original/

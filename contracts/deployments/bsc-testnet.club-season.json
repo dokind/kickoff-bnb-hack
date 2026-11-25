@@ -1,0 +1,8 @@
+{
+  "chainId": 97,
+  "clubLauncherFactory": "0x6dd91a33E3599b559b57a3045C55c4E1D0c76445",
+  "deployedAt": 144764153,
+  "goalVaultFactory": "0xB7D522d6cDA92b4dBF6B24E37e16c24C0D5bFC99",
+  "portal": "0x000042108465206185A077Edc3F3fd2b49060000",
+  "quoteToken": "0x190C989D5665a0e404B444b53CAE9AbCfb600157"
+}
