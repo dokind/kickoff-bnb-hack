@@ -36,3 +36,18 @@ Record anywhere quiet, phone 15–20 cm from your mouth. iPhone Voice Memos, Qui
 
 Want to change a line in your own words? Do it. Keep the same 11 lines in the same order and the
 video follows your timing.
+
+---
+
+## Or: his AI voice (SoloSpark Voice), no recording needed
+
+`vo/s1.aiff … s11.aiff` in this repo are already the 11 lines in his own cloned voice (namsrai-2.0 + his reference
+recording, English), picked take by take for speaker similarity and read-back accuracy (`vo/picks.json`).
+Rebuild them on the Windows PC with the GPU:
+
+    <solospark-voice>/workspace/envs/train/Scripts/python.exe my-voice-en.py --with-ref --takes 4 --speed 0.95 --out cand/slow
+    <solospark-voice>/workspace/envs/data/Scripts/python.exe pick-my-voice.py cand/slow --out vo
+
+`--with-ref` matters: without his reference clip the English lines drift to other speakers.
+To put a new voice on an already-rendered video without re-rendering it: `node dub-video.mjs <video.mp4> vo`.
+The voice weights are CC-BY-NC 4.0: fine for the hackathon, not for paid use.

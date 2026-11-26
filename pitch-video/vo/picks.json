@@ -1,0 +1,496 @@
+{
+ "picks": [
+  {
+   "line": 1,
+   "file": "cand\\slow\\s1_t1.aiff",
+   "sim": 0.69,
+   "wer": 0.0,
+   "heard": "What if showing up every day paid you and paid you more than the people who didn't?"
+  },
+  {
+   "line": 2,
+   "file": "cand\\slow\\s2_t1.aiff",
+   "sim": 0.713,
+   "wer": 0.053,
+   "heard": "Most fitness goals die in week 2, badges don't stop that and betting apps make money when you fail."
+  },
+  {
+   "line": 3,
+   "file": "cand\\slow\\s3_t2.aiff",
+   "sim": 0.726,
+   "wer": 0.0,
+   "heard": "Cypher run flips it, everyone puts in a small deposit, walks every day, and every check-in fills one shared bar."
+  },
+  {
+   "line": 4,
+   "file": "cand\\slow\\s4_t1.aiff",
+   "sim": 0.756,
+   "wer": 0.045,
+   "heard": "Joining takes one tap, on testnet the app gets you free test dollars, paste the deposit and drops you into your round."
+  },
+  {
+   "line": 5,
+   "file": "cand\\slow\\s5_t3.aiff",
+   "sim": 0.779,
+   "wer": 0.069,
+   "heard": "Then you walk Cypher and read today's steps from Apple Health or Health Connect. Read only, pass a thousand steps, check in and your share updates on the spot."
+  },
+  {
+   "line": 6,
+   "file": "cand\\slow\\s6_t3.aiff",
+   "sim": 0.758,
+   "wer": 0.0,
+   "heard": "Your round shows what you'd get if it launched right now and how every ending plays out. If the group falls short, your deposit comes back."
+  },
+  {
+   "line": 7,
+   "file": "cand\\slow\\s7_t0.aiff",
+   "sim": 0.782,
+   "wer": 0.038,
+   "heard": "When the bar is full, anyone can launch the round's token on flap. The prize half the supply and the trading fees go to people who showed up split by days. This real testnet round paid $822,411 and nothing the member who never walked."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow2\\s8_t3.aiff",
+   "sim": 0.669,
+   "wer": 0.043,
+   "heard": "Run it for a marathon, the race sponsors the pool, runners train for 6 weeks and the ones who trained most earn most."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow\\s9_t3.aiff",
+   "sim": 0.75,
+   "wer": 0.043,
+   "heard": "or a charity walk. A sponsor funds the pool sports walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 10,
+   "file": "cand\\slow\\s10_t4.aiff",
+   "sim": 0.736,
+   "wer": 0.059,
+   "heard": "Nobody holds the money, not even us. It's all contracts on BNB Smart Chain launch through Flap."
+  },
+  {
+   "line": 11,
+   "file": "cand\\slow\\s11_t2.aiff",
+   "sim": 0.687,
+   "wer": 0.071,
+   "heard": "Cypher and show up and get paid by the people who also showed up."
+  }
+ ],
+ "all": [
+  {
+   "line": 10,
+   "file": "cand\\slow\\s10_t0.aiff",
+   "sim": 0.685,
+   "wer": 0.118,
+   "heard": "Nobody holds the money, not even us. It's all contracts on BNB Smart Change launch through Flap."
+  },
+  {
+   "line": 10,
+   "file": "cand\\slow\\s10_t1.aiff",
+   "sim": 0.751,
+   "wer": 0.118,
+   "heard": "Nobody holds the money. Not even us. It's all contracts on BNB Smarty and launched through Flap."
+  },
+  {
+   "line": 10,
+   "file": "cand\\slow\\s10_t2.aiff",
+   "sim": 0.7,
+   "wer": 0.059,
+   "heard": "Nobody holds the money, not even us, it's all contracts on BNB smart chain launch through flap."
+  },
+  {
+   "line": 10,
+   "file": "cand\\slow\\s10_t3.aiff",
+   "sim": 0.71,
+   "wer": 0.235,
+   "heard": "Nobody holds the money, not even us. It's all contracts on BNB's Martins launch through Flap."
+  },
+  {
+   "line": 10,
+   "file": "cand\\slow\\s10_t4.aiff",
+   "sim": 0.736,
+   "wer": 0.059,
+   "heard": "Nobody holds the money, not even us. It's all contracts on BNB Smart Chain launch through Flap."
+  },
+  {
+   "line": 11,
+   "file": "cand\\slow\\s11_t0.aiff",
+   "sim": 0.617,
+   "wer": 0.214,
+   "heard": "Cypher on shop and get paid by the people who also showed up."
+  },
+  {
+   "line": 11,
+   "file": "cand\\slow\\s11_t1.aiff",
+   "sim": 0.654,
+   "wer": 0.0,
+   "heard": "Cypher run, show up and get paid by the people who also showed up."
+  },
+  {
+   "line": 11,
+   "file": "cand\\slow\\s11_t2.aiff",
+   "sim": 0.687,
+   "wer": 0.071,
+   "heard": "Cypher and show up and get paid by the people who also showed up."
+  },
+  {
+   "line": 11,
+   "file": "cand\\slow\\s11_t3.aiff",
+   "sim": 0.656,
+   "wer": 0.214,
+   "heard": "Cypher on shop and get paid by the people who also showed up"
+  },
+  {
+   "line": 1,
+   "file": "cand\\slow\\s1_t0.aiff",
+   "sim": 0.669,
+   "wer": 0.0,
+   "heard": "What if showing up every day paid you and paid you more than the people who didn't?"
+  },
+  {
+   "line": 1,
+   "file": "cand\\slow\\s1_t1.aiff",
+   "sim": 0.69,
+   "wer": 0.0,
+   "heard": "What if showing up every day paid you and paid you more than the people who didn't?"
+  },
+  {
+   "line": 1,
+   "file": "cand\\slow\\s1_t2.aiff",
+   "sim": 0.668,
+   "wer": 0.0,
+   "heard": "What if showing up every day paid you and paid you more than the people who didn't?"
+  },
+  {
+   "line": 1,
+   "file": "cand\\slow\\s1_t3.aiff",
+   "sim": 0.651,
+   "wer": 0.0,
+   "heard": "What if showing up every day paid you and paid you more than the people who didn't?"
+  },
+  {
+   "line": 2,
+   "file": "cand\\slow\\s2_t0.aiff",
+   "sim": 0.708,
+   "wer": 0.158,
+   "heard": "Most fitness calls die in week 2, badges don't stop there, and betting apps make money when you fail."
+  },
+  {
+   "line": 2,
+   "file": "cand\\slow\\s2_t1.aiff",
+   "sim": 0.713,
+   "wer": 0.053,
+   "heard": "Most fitness goals die in week 2, badges don't stop that and betting apps make money when you fail."
+  },
+  {
+   "line": 2,
+   "file": "cand\\slow\\s2_t2.aiff",
+   "sim": 0.675,
+   "wer": 0.053,
+   "heard": "Most fitness goals die in week 2, badges don't stop that and betting apps make money when you fail."
+  },
+  {
+   "line": 2,
+   "file": "cand\\slow\\s2_t3.aiff",
+   "sim": 0.704,
+   "wer": 0.053,
+   "heard": "Most fitness goals die in week 2, badges don't stop that and betting apps make money when you fail."
+  },
+  {
+   "line": 3,
+   "file": "cand\\slow\\s3_t0.aiff",
+   "sim": 0.665,
+   "wer": 0.0,
+   "heard": "Cypher run flips it. Everyone puts in a small deposit, walks every day and every check-in fills one shared bar."
+  },
+  {
+   "line": 3,
+   "file": "cand\\slow\\s3_t1.aiff",
+   "sim": 0.673,
+   "wer": 0.19,
+   "heard": "Cypher on Flipsit, everyone puts in a small deposit box every day and every check-in fills one shared bar."
+  },
+  {
+   "line": 3,
+   "file": "cand\\slow\\s3_t2.aiff",
+   "sim": 0.726,
+   "wer": 0.0,
+   "heard": "Cypher run flips it, everyone puts in a small deposit, walks every day, and every check-in fills one shared bar."
+  },
+  {
+   "line": 3,
+   "file": "cand\\slow\\s3_t3.aiff",
+   "sim": 0.751,
+   "wer": 0.19,
+   "heard": "Cypher and Flissit, everyone puts in a small deposit box every day and every check-in fills one shared bar."
+  },
+  {
+   "line": 4,
+   "file": "cand\\slow\\s4_t0.aiff",
+   "sim": 0.739,
+   "wer": 0.0,
+   "heard": "Joining takes one tap, on testnet the app gets you free test dollars, pays the deposit and drops you into your round."
+  },
+  {
+   "line": 4,
+   "file": "cand\\slow\\s4_t1.aiff",
+   "sim": 0.756,
+   "wer": 0.045,
+   "heard": "Joining takes one tap, on testnet the app gets you free test dollars, paste the deposit and drops you into your round."
+  },
+  {
+   "line": 4,
+   "file": "cand\\slow\\s4_t2.aiff",
+   "sim": 0.747,
+   "wer": 0.0,
+   "heard": "Joining takes one tap, on testnet the app gets you free test dollars, pays the deposit and drops you into your round."
+  },
+  {
+   "line": 4,
+   "file": "cand\\slow\\s4_t3.aiff",
+   "sim": 0.717,
+   "wer": 0.0,
+   "heard": "Joining takes one tap on Testnet, the app gets you free test dollars, pays the deposit and drops you into your round."
+  },
+  {
+   "line": 5,
+   "file": "cand\\slow\\s5_t0.aiff",
+   "sim": 0.756,
+   "wer": 0.069,
+   "heard": "Then you walk, Cypher Run reads today's steps from Apple Health or HealthConnect. Read only, pass a thousand steps, check in and your share updates on the spot."
+  },
+  {
+   "line": 5,
+   "file": "cand\\slow\\s5_t1.aiff",
+   "sim": 0.744,
+   "wer": 0.138,
+   "heard": "Then you walk Cypher and read today's steps from Apple Health or HealthConnect, read only. Pass a thousand steps, check in and your share updates on the spot."
+  },
+  {
+   "line": 5,
+   "file": "cand\\slow\\s5_t2.aiff",
+   "sim": 0.762,
+   "wer": 0.069,
+   "heard": "Then you walk, Cypherrun reads today's steps from Apple Health or HealthConnect read-only, pass a thousand steps, check-in, and your share updates on the spot."
+  },
+  {
+   "line": 5,
+   "file": "cand\\slow\\s5_t3.aiff",
+   "sim": 0.779,
+   "wer": 0.069,
+   "heard": "Then you walk Cypher and read today's steps from Apple Health or Health Connect. Read only, pass a thousand steps, check in and your share updates on the spot."
+  },
+  {
+   "line": 5,
+   "file": "cand\\slow\\s5_t4.aiff",
+   "sim": 0.758,
+   "wer": 0.069,
+   "heard": "Then you walk, Cypher on reads today's steps from Apple Health or Health Connect, read only, pass a thousand steps, check in and you'll share updates on the spot."
+  },
+  {
+   "line": 6,
+   "file": "cand\\slow\\s6_t0.aiff",
+   "sim": 0.739,
+   "wer": 0.0,
+   "heard": "Your round shows what you'd get if it launched right now and how every ending plays out if the group falls short your deposit comes back."
+  },
+  {
+   "line": 6,
+   "file": "cand\\slow\\s6_t1.aiff",
+   "sim": 0.746,
+   "wer": 0.038,
+   "heard": "Your round shows what you'd get if it launched right now, and how ever ending plays out. If the group falls short, your deposit comes back."
+  },
+  {
+   "line": 6,
+   "file": "cand\\slow\\s6_t2.aiff",
+   "sim": 0.731,
+   "wer": 0.0,
+   "heard": "Your round shows what you'd get if it launched right now and how every ending plays out. If the group falls short, your deposit comes back."
+  },
+  {
+   "line": 6,
+   "file": "cand\\slow\\s6_t3.aiff",
+   "sim": 0.758,
+   "wer": 0.0,
+   "heard": "Your round shows what you'd get if it launched right now and how every ending plays out. If the group falls short, your deposit comes back."
+  },
+  {
+   "line": 7,
+   "file": "cand\\slow\\s7_t0.aiff",
+   "sim": 0.782,
+   "wer": 0.038,
+   "heard": "When the bar is full, anyone can launch the round's token on flap. The prize half the supply and the trading fees go to people who showed up split by days. This real testnet round paid $822,411 and nothing the member who never walked."
+  },
+  {
+   "line": 7,
+   "file": "cand\\slow\\s7_t1.aiff",
+   "sim": 0.737,
+   "wer": 0.058,
+   "heard": "When the bar is full, anyone can launch the rounds token on Flap. The price, half the supply and the trading fees go to people who showed up split by days. This real testnet round paid $822,411 and nothing to the member who never walked."
+  },
+  {
+   "line": 7,
+   "file": "cand\\slow\\s7_t2.aiff",
+   "sim": 0.768,
+   "wer": 0.038,
+   "heard": "When the bar is full, anyone can launch the round's token or flap the prize half supply and the trading fees go to the people who showed up split by days. This real testnet round paid $822, 411 and nothing to the member who never walked."
+  },
+  {
+   "line": 7,
+   "file": "cand\\slow\\s7_t3.aiff",
+   "sim": 0.769,
+   "wer": 0.019,
+   "heard": "When the bar is full, anyone can launch the round's token on flap. The prize, half the supply and the trading fees go to people who showed up split by days. This real testnet round paid $822,411 and nothing to the member who never walked."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow\\s8_t0.aiff",
+   "sim": 0.702,
+   "wer": 0.13,
+   "heard": "Run it for a marathon, the race sponsors the pool, runners train for 6 weeks and the ones who train most turn most."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow\\s8_t1.aiff",
+   "sim": 0.716,
+   "wer": 0.217,
+   "heard": "Run it for American. The race sponsors, the pool, runners train for 6 weeks, and the ones who train most during most."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow\\s8_t2.aiff",
+   "sim": 0.675,
+   "wer": 0.174,
+   "heard": "Run it for a marathon, the race sponsors, the pools, runners train for 6 weeks and the ones who train most and most."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow\\s8_t3.aiff",
+   "sim": 0.69,
+   "wer": 0.13,
+   "heard": "Run it for a marathon, the race sponsors the pool, runners train for 6 weeks and the ones who train most during most."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow\\s9_t0.aiff",
+   "sim": 0.653,
+   "wer": 0.174,
+   "heard": "Our charity walker sponsor funds the pool, supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow\\s9_t1.aiff",
+   "sim": 0.69,
+   "wer": 0.13,
+   "heard": "or a charity walk. I sponsor funds to post supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow\\s9_t2.aiff",
+   "sim": 0.735,
+   "wer": 0.13,
+   "heard": "are a charity walk, a sponsor funds to post supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow\\s9_t3.aiff",
+   "sim": 0.75,
+   "wer": 0.043,
+   "heard": "or a charity walk. A sponsor funds the pool sports walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow\\s9_t4.aiff",
+   "sim": 0.644,
+   "wer": 0.043,
+   "heard": "are a charity walk, a sponsor funds the pool, supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow2\\s8_t0.aiff",
+   "sim": 0.72,
+   "wer": 0.13,
+   "heard": "Run it for a marathon. The race sponsors the pulled runners train for 6 weeks and the ones who trained most earned most."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow2\\s8_t1.aiff",
+   "sim": 0.692,
+   "wer": 0.217,
+   "heard": "Run it for a marathon, the race sponsors the pool, runners train for 6 weeks and the ones who trained most during most of the day."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow2\\s8_t2.aiff",
+   "sim": 0.732,
+   "wer": 0.174,
+   "heard": "Run it for a marathon. The race sponsors the pool, runners train for 6 weeks and the ones who train most earnmost."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow2\\s8_t3.aiff",
+   "sim": 0.669,
+   "wer": 0.043,
+   "heard": "Run it for a marathon, the race sponsors the pool, runners train for 6 weeks and the ones who trained most earn most."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow2\\s8_t4.aiff",
+   "sim": 0.729,
+   "wer": 0.174,
+   "heard": "Run it for a marathon. The race sponsors the pooled runners training for 6 weeks and the ones who trained most turn most."
+  },
+  {
+   "line": 8,
+   "file": "cand\\slow2\\s8_t5.aiff",
+   "sim": 0.694,
+   "wer": 0.217,
+   "heard": "Run it for Marathon, the race sponsors the pools runners train for 6 weeks and the ones who train most turn most."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow2\\s9_t0.aiff",
+   "sim": 0.71,
+   "wer": 0.087,
+   "heard": "Our charity walk, a sponsor funds the pool supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow2\\s9_t1.aiff",
+   "sim": 0.71,
+   "wer": 0.0,
+   "heard": "or a charity walk, a sponsor funds the pool, supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow2\\s9_t2.aiff",
+   "sim": 0.703,
+   "wer": 0.087,
+   "heard": "or a charity walk. A sponsor funds the pool, supporters walk every day, and members can get what they earn to cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow2\\s9_t3.aiff",
+   "sim": 0.685,
+   "wer": 0.0,
+   "heard": "or a charity walk, a sponsor funds the pool, supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow2\\s9_t4.aiff",
+   "sim": 0.729,
+   "wer": 0.0,
+   "heard": "or a charity walk. A sponsor funds the pool, supporters walk every day and members can give what they earn to the cause."
+  },
+  {
+   "line": 9,
+   "file": "cand\\slow2\\s9_t5.aiff",
+   "sim": 0.695,
+   "wer": 0.0,
+   "heard": "or a charity walk, a sponsor funds the pool, supporters walk every day and members can give what they earn to the cause."
+  }
+ ]
+}

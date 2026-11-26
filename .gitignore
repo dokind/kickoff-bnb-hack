@@ -44,3 +44,11 @@ app/assets/brand/original/
 
 # Rendered demo videos (large files): shared outside git
 pitch-video/*.mp4
+
+# Pitch video scratch: candidate voice takes, downloaded deck videos, renders
+pitch-video/cand/
+pitch-video/deck-videos/
+pitch-video/vo-mine/
+pitch-video/vo-ref/
+pitch-video/listen-*.mp3
+pitch-video/*.mp4
