@@ -47,7 +47,7 @@ void main() {
       expect(figure('7 people'), findsOneWidget);
       expect(figure('12 check-ins'), findsOneWidget);
       expect(figure('5,500 test USD deposited'), findsOneWidget);
-      expect(figure('1 token launched'), findsOneWidget);
+      expect(figure('1 coin launched'), findsOneWidget);
     });
 
     testWidgets('small numbers are shown as they are: no plus, no rounding '
@@ -70,7 +70,7 @@ void main() {
       expect(figure('1 person'), findsOneWidget);
       expect(figure('1 check-in'), findsOneWidget);
       expect(figure('999.99 test USD deposited'), findsOneWidget);
-      expect(figure('0 tokens launched'), findsOneWidget);
+      expect(figure('0 coins launched'), findsOneWidget);
       expect(find.textContaining('+', findRichText: true), findsNothing);
       expect(find.textContaining('1,000', findRichText: true), findsNothing);
       expect(find.byType(Icon), findsNothing);
@@ -145,7 +145,7 @@ void main() {
       for (final text in [
         '123,456,789.12 test USD claimed',
         '987,654,321.98 test USD deposited',
-        '4,321 tokens launched',
+        '4,321 coins launched',
       ]) {
         await tester.ensureVisible(figure(text));
         await settle(tester);
@@ -170,7 +170,7 @@ void main() {
       expect(
         find.bySemanticsLabel(
           'Everyone: 7 people, 12 check-ins, 5,500 test USD deposited, '
-          '1 token launched',
+          '1 coin launched',
         ),
         findsOneWidget,
       );
@@ -384,7 +384,8 @@ void main() {
       await tester.pumpWidget(inApp(HomeScreen(state: state, showBar: false)));
       await settle(tester);
       final list = find.byType(Scrollable).first;
-      for (var i = 0; i < 12; i++) {
+      // How it works has eight rows: it takes a few more drags to the end.
+      for (var i = 0; i < 18; i++) {
         await tester.drag(list, const Offset(0, -400));
         await settle(tester, 2);
         expect(tester.takeException(), isNull);

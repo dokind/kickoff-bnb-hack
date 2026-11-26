@@ -14,8 +14,8 @@ import '../widgets/identicon.dart';
 
 /// The result, after the launch: the token's address with links to BscScan
 /// testnet and to Flap, this wallet's days, its share (tokens and test USD)
-/// and Claim. Claim can be pressed again later: trading tax keeps arriving
-/// in the vault.
+/// and Claim. Claim can be pressed again later: the trading tax reaches the
+/// vault for the coin's first 30 days, and only when people trade.
 class ResultScreen extends StatefulWidget {
   const ResultScreen({super.key, required this.state});
   final AppState state;
@@ -129,14 +129,16 @@ class _ResultScreenState extends State<ResultScreen> {
                     alignment: Alignment.centerLeft,
                     child: Semantics(
                       header: true,
-                      child: Text('THE TOKEN\nIS LIVE.', style: t.display(58)),
+                      child: Text('THE COIN\nIS LIVE.', style: t.display(58)),
                     ),
                   ),
                   const SizedBox(height: Space.s3),
                   Text(
                     '${round?.name ?? 'The round'} filled the bar with '
-                    '${formatCount(total)} check-ins. The prize and half of '
-                    'the supply are in the vault, shared by days shown up.',
+                    '${formatCount(total)} check-ins. The prize and 500,000 '
+                    'of the 1,000,000 new coins are in the group\'s piggy '
+                    'bank, split by days shown up. The other half is in the '
+                    'shop, locked forever.',
                     style: t.body(15).copyWith(color: c.text2),
                   ),
                   const SizedBox(height: 22),
@@ -145,7 +147,7 @@ class _ResultScreenState extends State<ResultScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Overline('Token'),
+                          const Overline('Coin'),
                           const SizedBox(height: Space.s2),
                           Row(
                             children: [
@@ -158,11 +160,11 @@ class _ResultScreenState extends State<ResultScreen> {
                               const SizedBox(width: Space.s2),
                               GlassIconButton(
                                 icon: Icons.copy_rounded,
-                                tooltip: 'Copy token address',
+                                tooltip: 'Copy coin address',
                                 size: 38,
                                 onPressed: () {
                                   Clipboard.setData(ClipboardData(text: token));
-                                  showMessage(context, 'Token address copied.');
+                                  showMessage(context, 'Coin address copied.');
                                 },
                               ),
                             ],
@@ -281,7 +283,7 @@ class _ResultScreenState extends State<ResultScreen> {
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                'tokens',
+                                'coins',
                                 style: t
                                     .body(13, FontWeight.w500)
                                     .copyWith(color: c.text2),
@@ -301,8 +303,8 @@ class _ResultScreenState extends State<ResultScreen> {
                               Expanded(
                                 child: Text(
                                   '${formatAmount(_state.claimedTokens)} '
-                                  'tokens · '
-                                  '${formatMoney(_state.claimedQuote, usd)}',
+                                  'coins · '
+                                  '${formatTestUsd(_state.claimedQuote)}',
                                   textAlign: TextAlign.right,
                                   style: t.body(13, FontWeight.w600),
                                 ),
@@ -311,8 +313,8 @@ class _ResultScreenState extends State<ResultScreen> {
                           ),
                           const SizedBox(height: Space.s2),
                           Text(
-                            'Trading tax keeps arriving in the vault. Claim '
-                            'again whenever there is more.',
+                            '$taxLine Claim again whenever there is more.',
+                            key: const Key('result-tax'),
                             style: t.body(12).copyWith(color: c.text2),
                           ),
                           if (_tx != null) ...[

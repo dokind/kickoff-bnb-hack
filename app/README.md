@@ -2,10 +2,15 @@
 
 Flutter app (web, iOS and Android) for Cypher Run.
 
-**A discipline app with money on it.** You pay a deposit to join and check in
-every day you move. Everyone's check-ins fill one bar. When it is full, a
-token launches on [Flap](https://flap.sh), and the deposits and the token are
-shared by how many days each person showed up. A sponsor is optional.
+**Showing up turns into a community, and a community into a launch.** A
+group puts in equal deposits and checks in each day they move. Everyone's
+check-ins fill one bar. If the group falls short, everyone gets 100% back
+(each presses Refund after the deadline). If the bar fills, the group
+launches its own coin on [Flap](https://flap.sh) (Pool Launch), and the
+piggy bank is split by days shown up, not by deposits. A sponsor can fill
+the coin's shop so every deposit is prize (a Season, below); without one, a
+share of each deposit (30% by default) builds the shop. Running is the first
+club; it works for any group where showing up can be stamped.
 
 Everything on chain is BSC testnet (chain id 97) with Flap's free-mint test
 USD. Nothing has real value.
@@ -19,7 +24,7 @@ USD. Nothing has real value.
 | Launch | "Launch Demo Day", open to anyone once the bar is full | `CheckInLauncher.launch()`: the Flap Portal creates the token, the pool gets the sponsor money plus the launch share of the deposits, the vault gets the prize and half the supply |
 | Claim | "Claim · Demo Day", again whenever trading tax has arrived | `StreakVault.claim()` |
 | Refund | "Deposit back · Demo Day", if the deadline passes with no launch | `CheckInLauncher.refund()` |
-| Sponsor (optional) | "Sponsor the token pool" | mint if needed, `approve`, `sponsor(amount)`; earns no share, comes back if the round does not launch |
+| Sponsor (optional) | "Sponsor the shop" | mint if needed, `approve`, `sponsor(amount)`; earns no share, comes back if the round does not launch |
 
 **"Get test dollars" is a visible step on purpose.** It is labelled "Testnet:
 free test dollars. On mainnet this step is paying with a stablecoin." The
@@ -78,6 +83,8 @@ not one of our rounds says "That link does not lead to a round."
 "Invite" on a round's card (and "Invite someone" under its members) opens a
 sheet with the link, "Copy link" and a QR code of the same link.
 
+Sharing: the Share button on Your round (and "Share card" beside "Invite someone") opens a 4:5 share card of the round (name, Season badge, deposit, the bar, members, both endings, a QR of the link) with Share (the PNG and the link through `share_plus`; a browser that can't share files downloads the PNG and copies the link), Copy link and, on the web, Save image (`lib/screens/share_sheet.dart`, `lib/widgets/share_card.dart`).
+
 Phone builds have no web address unless `WEB_BASE_URL` is set; without it the
 sheet hands out the round's address instead. Phone builds also do not catch
 `https://` links from other apps (no universal links are set up), so a link
@@ -107,6 +114,79 @@ itself each time it reads the rounds. Until an unlisted choice is saved the
 server may show the round: it lists a round nobody registered three minutes
 after its creation.
 
+## Seasons
+
+A Season is one event with one set of dates (Season 1: check-ins Tue 1 Dec
+to Wed 30 Dec 2026, UTC days, so each day starts at 07:00 in Bangkok), made
+of **squads of 10**. Each squad is its own round: one bar, one piggy bank,
+one coin. A Season squad puts **0% of each deposit into the shop**: a
+sponsor fills it, so every deposit is prize.
+
+**Where it comes from.** The server sends a `season` object with a round
+that is part of one (`Season.fromJson` in `lib/services/verifier_api.dart`):
+`{name, start, end, joinUntil, startDay, endDay, joinUntilDay, day, days,
+squadSize}`, the day numbers being the contract's (`unix seconds / 86400`).
+The day numbers are read first and the `YYYY-MM-DD` dates stand in for them.
+Every other round has `season: null` or no key at all, and **a server that
+does not send it yet changes nothing**: the round is an ordinary round. A
+round kept on the device keeps its season (`Round.toJson`). All the words
+are in `lib/util/season_text.dart`.
+
+**Same start day for everyone.** The contract has no start date; the server
+signs no check-in for a Season squad before its first day or after its last
+(a server rule, like the 1,000 steps). The app says so before asking
+anything: before the start, "Check in" does not open the sheet and nothing
+is sent to the server, the faucet or the chain
+(`showCheckInSheet`, `AppState.checkIn`); the banner says the server's own
+refusal, word for word: "Season 1 check-ins open Tue 1 Dec (07:00 in
+Bangkok). Everyone starts at 0." (after the end: "Season 1 check-ins have
+ended. The last day was Wed 30 Dec."). The hint over the action and the
+streak say "Check-ins open 1 Dec · in 6 days" (after the end: "Check-ins
+ended 30 Dec"), and no "check in today" nudge is shown.
+
+**Joining.** The contract takes joins until the launch or the deadline. The
+app stops offering Join after the Season's last day to join (Mon 7 Dec, the
+last day a newcomer can still reach 24 of 30 days) or once the squad has 10
+members: the action is a disabled "Joining closed 7 Dec" or "Squad full",
+under "The contract still takes joins; the app stops here so everyone
+starts fair." The join sheet says when the Season starts ("Starts Tue 1 Dec.
+Everyone starts at 0.") or, once started, "Day 5 of 30: 26 days left". The
+same sheet warns "The bar can fill today." whenever what is left of the goal
+is no more than one check-in per member (any round).
+
+**The two endings, and the Keep-Up Guarantee.** The join sheet always says
+both endings: "No launch by the deadline: press Refund and your 100 test USD
+comes back." and "It launches: you're paid by your days, not by your
+deposit." Only when 0% of the deposits goes to the shop does it add "It
+launches and your days are at least the average: your whole deposit back,
+or more." and "Fewer days than the average: you get back less." That is
+true by the contracts: with 0% to the shop the prize is every deposit, and
+the piggy bank pays `prize x your days / all days` (frozen at launch), so
+days at or above the average (all days / all members, 0-day members
+included) get at least the deposit back in test USD. Coins and tax come on
+top and are never promised. A round with a shop share never shows it.
+
+**Your round.** Under the bar: "Season 1 starts Tue 1 Dec · everyone at 0"
+before the start, "Day 7 of 30 · average 4.2 days · you 5" during, and
+"This squad can't fill now. 100% back after 31 Dec." once even every member
+(and, while joining is still open, a full squad) checking in on every day
+left could not fill the bar. A round that puts none of the deposits in the
+shop says "Your deposit never touches the coin"; no other round does.
+
+**Starting one.** The new-round form's shop share has "0% · a sponsor fills
+the shop" ("Needs a sponsor's shop money to launch. Every deposit is
+prize."). 30% stays the default, with its own line: "30% of each deposit
+becomes locked shop money at launch. Keep up with the average and you get
+at least 70% back, plus coins and tax." Season squads themselves are created
+by script, not from the app.
+
+**Tax.** Wherever Claim can be pressed again the app says "Tax arrives for
+30 days after the launch, and only when people trade." (the coin's tax
+lasts 30 days).
+
+Running is the first club; About says "It works for any group where showing
+up can be stamped." Today the only stamp is steps.
+
 ## Screens
 
 The app is exactly these, in a centred 480px column on wide screens.
@@ -114,15 +194,15 @@ The app is exactly these, in a centred 480px column on wide screens.
 | Screen | Where | File | What it does |
 |---|---|---|---|
 | Onboarding | `/onboarding` | `lib/screens/onboarding_screen.dart` | Shown once. Step 1: a hero line, one sentence, one button. The wallet is made silently when the button is pressed and the faucet is asked in the background. Step 2: connect Apple Health / Health Connect ("Allow access", "Not now"); in a browser, a note that the check-in there is self-reported |
-| Home | `/` (and `/r/<launcher>`) | `lib/screens/home_screen.dart`, `lib/widgets/round_slider.dart` | At the top the round cards: name, a state chip (Open, Bar full, Launched, Ended), the bar (a tick gauge of `totalCheckIns` of `checkInGoal`), prize so far, members, the deadline, "You're in" for a member, "Unlisted" where it applies, and "Invite". Under the selected card: THE PRIZE (`lib/widgets/pot_section.dart`, members shown with a friendly name from `lib/util/names.dart`, arithmetic in `lib/util/pot.dart`: what this wallet would get "if it launched now", what today's check-in does to its share, and every member's days, share of all check-ins and amount, most days first, with "You" always in sight), then, while the token pool is under Flap's floor, one line saying how many more members or a sponsor it needs (`lib/widgets/launch_floor_line.dart`), then the streak (`lib/widgets/streak_block.dart`: days, today's state, the last seven days), the prize so far in dot-matrix numerals beside the token pool, "How it works" and, last, SO FAR (`lib/widgets/so_far_card.dart`: this wallet across its rounds and everyone across every round, from `GET /stats/:address`; left out when the server does not answer it). ONE primary action (table below) floats at the bottom on a scrim that is opaque behind it. Reads the rounds again every 20 seconds |
+| Home | `/` (and `/r/<launcher>`) | `lib/screens/home_screen.dart`, `lib/widgets/round_slider.dart` | At the top the round cards: name, a state chip (Open, Bar full, Launched, Ended), the bar (a tick gauge of `totalCheckIns` of `checkInGoal`), prize so far, members, the deadline, "You're in" for a member, "Unlisted" where it applies, and "Invite". Under the selected card: THE PRIZE (`lib/widgets/pot_section.dart`, members shown with a friendly name from `lib/util/names.dart`, arithmetic in `lib/util/pot.dart`: what this wallet would get "if it launched now", what today's check-in does to its share, and every member's days, share of all check-ins and amount, most days first, with "You" always in sight), then, while the shop money is under Flap's floor, one line saying how many more members or a sponsor it needs (`lib/widgets/launch_floor_line.dart`), then the streak (`lib/widgets/streak_block.dart`: days, today's state, the last seven days), the prize so far in dot-matrix numerals beside the shop money, "How it works" and, last, SO FAR (`lib/widgets/so_far_card.dart`: this wallet across its rounds and everyone across every round, from `GET /stats/:address`; left out when the server does not answer it). ONE primary action (table below) floats at the bottom on a scrim that is opaque behind it. Reads the rounds again every 20 seconds |
 | Invite | sheet over Home | `lib/screens/invite_sheet.dart` | The round's link, "Copy link" and a QR code of it. On the device that started the round: the "Unlisted" switch |
-| Join | sheet over Home | `lib/screens/join_sheet.dart` | The round's name over the title. The deposit, its split into prize and token pool (from `liquidityBps`), what happens if the bar fills or does not, then two steps with progress: "Get test dollars" and "Pay deposit". Waits for the faucet's gas first and says "Preparing your wallet" |
+| Join | sheet over Home | `lib/screens/join_sheet.dart` | The round's name over the title (and a Season squad's start or days left under it). The deposit, its split into prize and shop ("To the prize", "Into the shop", from `liquidityBps`; "None · a sponsor fills it" at 0%), the two endings and what can be lost (with the Keep-Up lines when 0% goes to the shop), then two steps with progress: "Get test dollars" and "Pay deposit". Waits for the faucet's gas first and says "Preparing your wallet". A Season squad past its last day to join, or full, gets a disabled "Joining closed 7 Dec" / "Squad full" instead |
 | Check-in | sheet over Home | `lib/screens/checkin_sheet.dart` | The round's name over the title. Phone: today's steps from the health store against the minimum. Browser: a number field labelled "Self-reported, testnet only". Then the transaction link |
-| Sponsor | sheet over Home | `lib/screens/sponsor_sheet.dart` | The round's name over the title. An amount, prefilled with what the token pool is short of |
+| Sponsor | sheet over Home | `lib/screens/sponsor_sheet.dart` | The round's name over the title. "Sponsor the shop": an amount, prefilled with what the shop money is short of |
 | Result | `/result` | `lib/screens/result_screen.dart` | After the launch: the round's name over the title, the token address with links to testnet.bscscan.com and `https://flap.sh/bnb-testnet/<token>`, your days, your share (tokens and test USD), Claim. Opens only once the round is launched |
 | Wallet | `/account` (also `/wallet`) | `lib/screens/account_screen.dart` | Your money and your key, nothing about rounds. The balance card first (test USD in dot-matrix numerals, test BNB for network fees, "Get test dollars"), then one list: "Address" (press to copy), "Back up your key" (a sheet; the key shows only after "Show key" and is hidden again each time the sheet opens), "Use another wallet" (a sheet: paste a key) and "About" (a sheet with "Built on Flap") |
 | Add a round | sheet, from the "+" in the tab bar | `lib/screens/add_round_sheet.dart` | Two rows: "Start a round" (opens `/new`) and "Open an invite link" (the sheet becomes one field for a link or an address; on success the app goes Home with that round selected). The "+" is an action, not a place: it is never the selected tab |
-| New round | `/new` | `lib/screens/new_round_screen.dart` | A full screen with a back control and no tab bar. Name, deposit, goal, how long it runs; the token pool's share and the "Unlisted" switch under "More options"; "The deal" (the choices in money, line by line); "Start round" pinned at the bottom. After it the same screen says "Round started" with the round's name, "Invite people", "Go to round" and whether the server saved the listing |
+| New round | `/new` | `lib/screens/new_round_screen.dart` | A full screen with a back control and no tab bar. Name, deposit, goal, how long it runs; the shop's share and the "Unlisted" switch under "More options"; "The deal" (the choices in money, line by line); "Start round" pinned at the bottom. After it the same screen says "Round started" with the round's name, "Invite people", "Go to round" and whether the server saved the listing |
 
 Home's one primary action, for the selected round (`AppState.stage` in
 `lib/app_state.dart`). Every action that does something names its round,
@@ -131,9 +211,10 @@ here "Demo Day":
 | State | Action | Notes |
 |---|---|---|
 | not a member | **Join Demo Day · 1,000 USD** | opens the join sheet |
-| member, not checked in today | **Check in · Demo Day** | opens the check-in sheet |
+| not a member, Season squad past its last day to join or full | **Joining closed 7 Dec** / **Squad full** (disabled) | "The contract still takes joins; the app stops here so everyone starts fair." |
+| member, not checked in today | **Check in · Demo Day** | opens the check-in sheet. A Season squad before its first day: the hint is "Check-ins open 1 Dec · in 6 days" and the press only says when (no sheet, nothing sent) |
 | member, checked in today | **Checked in** (disabled) | "Come back tomorrow. The next day starts in 5 h 12 min." |
-| bar full, before the deadline | **Launch Demo Day** | anyone, member or not. If the token pool is under Flap's floor the button is disabled, the hint says how much is missing and "Sponsor the token pool" appears. A member who has not checked in today also gets "Check in first" |
+| bar full, before the deadline | **Launch Demo Day** | anyone, member or not. If the shop money is under Flap's floor the button is disabled, the hint says how much is missing and "Sponsor the shop" appears. A member who has not checked in today also gets "Check in first" |
 | launched, you have days | **Claim · Demo Day** | opens the result |
 | launched, no days | **See the result · Demo Day** | |
 | deadline passed, money in the round | **Deposit back · Demo Day** | |
@@ -142,7 +223,7 @@ here "Demo Day":
 | server unreachable | one sentence and "Retry" | |
 
 For the selected round, membership, days, today's check-in, the deposit,
-`launched`, `totalCheckIns` and the token pool are read from the round's
+`launched`, `totalCheckIns` and the shop money are read from the round's
 contract; if the chain cannot be read the server's numbers stand in. The
 streak, the list of days and the members list come from the server. The
 other cards show the server's numbers, and "You're in" from one `isMember`
@@ -175,13 +256,13 @@ is clear at its top edge and fully opaque 48px lower, where the hint line
 starts, so nothing shows through the text. The content's bottom padding is
 the measured height of the floating area plus 16px, so the last card scrolls
 fully above it whatever the area holds (it is taller when "Sponsor the
-token pool" is there).
+shop" is there).
 
 ### Starting a round
 
 The "+" in the tab bar opens "Add a round"; "Start a round" there opens the
 new-round screen (`/new`): name, deposit, check-in goal, how long it runs,
-and under "More options" the token pool's share and the "Unlisted" switch. The app mines the launch salt
+and under "More options" the shop's share and the "Unlisted" switch. The app mines the launch salt
 (the token address must end in `7777`), calls `Portal.newLauncher` with the
 `CheckInLauncherFactory` and the Portal's 0.005 tBNB salt lock fee, and then:
 
@@ -200,7 +281,9 @@ calls answer for) is still set on the server (`POST /admin/round` in
 Flap will not open a pool under its floor (1,500 test USD today,
 `AppConfig.launchPoolFloor`). With a 1,000 USD deposit and a 30% launch share
 that is five members, or fewer members plus a sponsor. The form's summary
-says so for the numbers picked.
+says so for the numbers picked. The shop share can also be 0% ("a sponsor
+fills the shop"): then only a sponsor's money can reach the floor, and
+every deposit is prize (see Seasons).
 
 ### When something goes wrong
 
@@ -218,8 +301,9 @@ then offers "Finish check-in" and does not ask the server twice.
 
 ## Look
 
-Rebuilt in Flutter after the teammate's SwiftUI prototype (not a line of its
-code is used): the same screens, layout, type, spacing, motion and parts.
+Rebuilt in Flutter after a friend's earlier prototype (Delgersaikhan's), used
+only as the visual reference (not a line of its code is used): the same screens,
+layout, type, spacing, motion and parts.
 
 - **Background.** Deep ink (`#0A0E11` / `#05080A`) with a drifting aurora:
   nine soft lights on a 3 by 3 grid whose middle points move on 30, 40 and 60
@@ -277,18 +361,20 @@ lib/
     so_far_card.dart        SO FAR on Home: this wallet and everyone, in plain counts
   util/format.dart          amounts, dates, UTC days, friendlyError
   util/pot.dart             the prize share arithmetic: the vault's rule (amount * days / total, rounded down), shares, which rows are shown
+  util/season_text.dart     what the app says about a Season (start, days left, average, join closed, can't fill)
 assets/brand/               Flap's official logo and its usage notes
 web/                        web shell (index.html, manifest, icons)
 test/
   services_test.dart        ABI encodings pinned, salt mining, signed texts, VerifierApi against a mock client, config
   state_test.dart           every Home stage, the gas wait, join, check-in (and its retry), claim, refund
-  rounds_test.dart          the /rounds calls, the pinned registration text and signatures, invite link text, the slider's order, selection and what is remembered, rounds opened by link, starting and listing a round, the fallback to a single-round server
+  rounds_test.dart          the /rounds calls, the pinned registration text and signatures, invite link text, the slider's order, selection and what is remembered, rounds opened by link, starting and listing a round, the fallback to a single-round server, and Seasons: parsed, missing or null, kept on the device, UTC day boundaries, the join window and size, can't fill, the words, and no call at all for a check-in before the start or after the end
+  round_screen_test.dart    Your round: the next step, the receipt, the endings, each state, the ways in, and a Season squad's line under the bar (before, during, can't fill), the short hint and the server's sentence after its last day, its badge and a full squad
   slider_test.dart          the cards and dots, moving on every 5 seconds until a touch (fake timers), reduced motion, the invite sheet and its QR, the scrim and the room under the content
   safe_action_test.dart     the action is for the round it names: no moving on after the first touch, with a sheet or dialog open, from a round link or with reduced motion; the round's name on the action (and cut short when long) and over the sheets' titles; a sheet keeps its round when the selection changes behind it
   home_test.dart            a widget test for each Home state, plus the bar, prize, shares, no round, unreachable
   pot_test.dart             the prize share arithmetic (one member, no check-ins, zero days, uneven days, cents never above the prize) and THE PRIZE in each state: member, checked in, not joined, launched, ended, loading, error, fifty members, 320 wide with large text
   so_far_test.dart          SO FAR: the figures as they are, what is left out, where they come from, last on Home
-  flow_test.dart            join sheet steps, check-in on web and phone, onboarding and routing, /r/<launcher> with and without a wallet, result, Wallet and its sheets, the "+" and "Add a round", the new-round screen (the deal, the "Unlisted" switch, the registration call, the done state)
+  flow_test.dart            join sheet steps (the two endings, the Keep-Up lines only at 0%, "the bar can fill today", a Season squad's lines, closed after 7 Dec or at 10), the Season check-in guard, check-in on web and phone, onboarding and routing, /r/<launcher> with and without a wallet, result, Wallet and its sheets, the "+" and "Add a round", the new-round screen (the deal, the 0% choice, the "Unlisted" switch, the registration call, the done state)
   design_test.dart          formats, dot-matrix font, gauges, aurora, pills, banner, banned words
   wallet_key_test.dart      the key is always 64 hex characters
 ```
@@ -370,7 +456,7 @@ What the app calls (`lib/services/verifier_api.dart`; the tests in
 | Call | Used for |
 |---|---|
 | `GET /rounds` | the public list: `{rounds: [...]}`, each entry with `launcher`, `name`, `deposit`, `liquidityBps`, `checkInGoal`, `totalCheckIns`, `memberCount`, `prizeNow`, `poolQuoteNow`, `deadline`, `launched`, `token`, `vault`, `state` and `featured`. Amounts are read as decimal strings in whole units ("1000", "356.2"); a whole number of 16 digits or more is taken as base units. The app orders the cards itself and works out open / launched / ended from `launched` and `deadline` |
-| `GET /rounds/:launcher` | one round in full, listed or not, with `minSteps` and `unlisted`. Asked for the selected round and for every round this device knows that the list leaves out. 404 `{error: "no_round"}` means our factory did not create it |
+| `GET /rounds/:launcher` | one round in full, listed or not, with `minSteps` and `unlisted`. Asked for the selected round and for every round this device knows that the list leaves out. 404 `{error: "no_round"}` means our factory did not create it. Here and in each `GET /rounds` entry an optional `season` (see Seasons) is read; null or missing means an ordinary round |
 | `GET /rounds/:launcher/me/:address` | `streak`, `bestStreak`, `days`, and stand-ins for membership, days and the share when the chain cannot be read. Addresses are sent in lower case |
 | `GET /rounds/:launcher/members` | the members list, a plain JSON array (an object with `members` is also read). THE PRIZE is drawn from it: one call per round, no chain read per member from the phone |
 | `GET /stats/:address` | SO FAR: `people`, `checkIns`, `deposited`, `launched` across every round our factory created, `complete`, and `you` (`rounds`, `days`, `claimed`) for this wallet. 404 (a server from before it) means no card; an answer with `complete: false` does not replace whole totals |
@@ -443,6 +529,12 @@ starts in" hint are in UTC days. In Bangkok the day turns at 07:00.
 
 ## Not checked
 
+- **Seasons against a real Season round.** On 26 November 2026 the hosted
+  server did not send `season` yet and no Season squad existed, so the
+  Season screens were checked by widget tests and by screenshots rendered at
+  360pt with the app's own fonts, not on the hosted site. The guard mirrors
+  the server rule; the server's own refusal (shown as its sentence) still
+  applies to an older app build.
 - **The per-round server calls: reads were checked against the real
   server, writes were not.** On 26 November 2026 the hosted server got the
   build with `/rounds`. This app's own client (`VerifierApi`) then read

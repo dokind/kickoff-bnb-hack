@@ -86,6 +86,14 @@ const _months = [
 /// A full date: "26 Nov 2026".
 String formatDate(DateTime d) => '${d.day} ${_months[d.month - 1]} ${d.year}';
 
+/// A day and its month: "1 Dec". [d] is read as given: pass a UTC time for a
+/// UTC day.
+String formatDayMonth(DateTime d) => '${d.day} ${_months[d.month - 1]}';
+
+/// The same with its weekday: "Tue 1 Dec". [d] is read as given.
+String formatWeekdayDayMonth(DateTime d) =>
+    '${_weekdays[d.weekday - 1]} ${formatDayMonth(d)}';
+
 /// Time of day, 24 hours: "23:59".
 String formatTime(DateTime d) =>
     '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
@@ -129,6 +137,19 @@ String days(int n) => n == 1 ? '1 day' : '$n days';
 
 /// The contract's day number: unix seconds / 86400.
 int dayIndexOf(DateTime t) => t.toUtc().millisecondsSinceEpoch ~/ 86400000;
+
+/// The start of the contract's day number [day]: 00:00 UTC.
+DateTime utcDayStart(int day) =>
+    DateTime.fromMillisecondsSinceEpoch(day * 86400000, isUtc: true);
+
+/// The contract's day number of a "YYYY-MM-DD" (UTC) date; null when the
+/// text is not a real date.
+int? dayIndexOfKey(String key) {
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(key)) return null;
+  final t = DateTime.tryParse('${key}T00:00:00Z');
+  if (t == null || utcDayKey(t) != key) return null;
+  return dayIndexOf(t);
+}
 
 /// The day key the server expects: "YYYY-MM-DD" in UTC.
 String utcDayKey(DateTime t) {

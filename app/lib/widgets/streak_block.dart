@@ -4,6 +4,7 @@ import '../app_state.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
+import '../util/season_text.dart';
 import 'controls.dart';
 import 'gauges.dart';
 import 'identicon.dart';
@@ -19,13 +20,26 @@ class StreakBlock extends StatelessWidget {
     final t = context.type;
     final c = context.colors;
     final streak = state.streak;
+    final season = state.round?.season;
+    final now = state.now;
     final (text, colour, live) = switch (state.stage) {
       HomeStage.join => ('Round open · not joined yet', c.volt, false),
+      // A Season squad before its first check-in day, or after its last.
+      HomeStage.checkIn when season != null && season.notStarted(now) => (
+        season.opensHint(now),
+        c.volt,
+        false,
+      ),
+      HomeStage.checkIn when season != null && season.checkInsOver(now) => (
+        season.endedHint,
+        c.text2,
+        false,
+      ),
       HomeStage.checkIn => ('Not checked in today', c.volt, true),
       HomeStage.checkedIn => ('Checked in today', c.success, false),
       HomeStage.launch => ('Bar full · ready to launch', c.volt, true),
       HomeStage.claim ||
-      HomeStage.result => ('Token launched', c.success, false),
+      HomeStage.result => ('Coin launched', c.success, false),
       HomeStage.refund || HomeStage.ended => ('Round ended', c.danger, false),
       _ => ('', c.text, false),
     };

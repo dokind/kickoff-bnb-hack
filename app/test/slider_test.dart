@@ -84,7 +84,7 @@ void main() {
       expect(find.text('Morning Movers'), findsOneWidget);
       expect(find.text('Open'), findsOneWidget);
       expect(find.text('2 / 6 check-ins'), findsOneWidget);
-      expect(find.text('Prize so far 2,100 USD'), findsOneWidget);
+      expect(find.text('Prize 2,100 test USD'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(RoundCard),
@@ -120,6 +120,12 @@ void main() {
       // The selected dot is the wide one.
       expect(tester.getSize(find.byKey(const Key('round-dot-0'))).width, 20);
       expect(tester.getSize(find.byKey(const Key('round-dot-1'))).width, 7);
+      // Each dot is pressed through a target at least 44 pt square.
+      for (var i = 0; i < 3; i++) {
+        final target = tester.getSize(find.byKey(Key('round-dot-target-$i')));
+        expect(target.width, greaterThanOrEqualTo(44));
+        expect(target.height, greaterThanOrEqualTo(44));
+      }
     });
 
     testWidgets('a swipe selects the next round and everything under it', (
@@ -140,7 +146,7 @@ void main() {
       expect(find.text('Lumpini Striders'), findsOneWidget);
       expect(find.text('You\'re in'), findsOneWidget);
       expect(find.text('5 / 6 check-ins'), findsOneWidget);
-      expect(find.text('Prize so far 2,800 USD'), findsOneWidget);
+      expect(find.text('Prize 2,800 test USD'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(RoundCard),
@@ -660,7 +666,7 @@ void main() {
       final scrim = tester.getRect(find.byKey(const Key('home-action')));
       final solidFrom = scrim.top + BottomFade.defaultRise;
       final hint = tester.getRect(
-        find.text('Pay once. It comes back if the token never launches.'),
+        find.text('Pay once. Back with Refund if not launched in time.'),
       );
       final button = tester.getRect(action('Join Morning Movers · 1,000 USD'));
       expect(hint.top, greaterThanOrEqualTo(solidFrom));
@@ -702,7 +708,7 @@ void main() {
         tester.getSize(find.byKey(const Key('home-action'))).height,
         greaterThan(260),
       );
-      expect(action('Sponsor the token pool'), findsOneWidget);
+      expect(action('Sponsor the shop'), findsOneWidget);
       await toTheEnd(tester);
       final scrim = tester.getRect(find.byKey(const Key('home-action')));
       final last = tester.getRect(find.byKey(const Key('how-it-works')));

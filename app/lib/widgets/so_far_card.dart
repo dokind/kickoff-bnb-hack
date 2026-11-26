@@ -42,7 +42,7 @@ class SoFarCard extends StatelessWidget {
     (formatAmount(s.deposited), 'test ${AppConfig.quoteSymbol} deposited'),
     (
       formatCount(s.launched),
-      s.launched == 1 ? 'token launched' : 'tokens launched',
+      s.launched == 1 ? 'coin launched' : 'coins launched',
     ),
   ];
 

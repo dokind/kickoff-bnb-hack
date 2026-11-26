@@ -34,12 +34,13 @@ class LaunchFloorLine extends StatelessWidget {
       liquidityBps: round.liquidityBps,
     );
     if (n == null) {
-      return 'Launch also needs $floor test $usd in the token pool. In this '
-          'round a deposit adds nothing to it, so it takes a sponsor.';
+      return 'Launch also needs $floor test $usd of shop money (Flap\'s '
+          'floor). In this round a deposit adds nothing to it, so it takes a '
+          'sponsor.';
     }
     final members = n == 1 ? '1 more member' : '${formatCount(n)} more members';
-    return 'Launch also needs $floor test $usd in the token pool: about '
-        '$members at this deposit, or a sponsor.';
+    return 'Launch also needs $floor test $usd of shop money (Flap\'s '
+        'floor): about $members at this deposit, or a sponsor.';
   }
 
   @override

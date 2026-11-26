@@ -37,6 +37,8 @@
 	<string>Cypher Run reads today's step count when you check in.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Cypher Run does not write to Apple Health.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Cypher Run saves a round's share card to your photos when you choose Save Image.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

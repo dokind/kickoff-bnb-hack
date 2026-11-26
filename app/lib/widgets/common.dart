@@ -212,6 +212,11 @@ const String testUsd = 'test ${AppConfig.quoteSymbol}';
 String formatTestUsd(BigInt value, {int maxFraction = 2}) =>
     formatMoney(value, testUsd, maxFraction: maxFraction);
 
+/// How long the trading tax reaches the piggy bank, said wherever Claim can
+/// be pressed again: the coin taxes trades for its first 30 days only.
+const String taxLine =
+    'Tax arrives for 30 days after the launch, and only when people trade.';
+
 /// The small permanent "TESTNET" capsule. Home's header shows it under the
 /// greeting, beside the round count, so no amount on the screen reads as
 /// real money. It is a label, not a control.

@@ -8,6 +8,7 @@ import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../util/names.dart';
 import '../util/pot.dart';
+import '../util/season_text.dart';
 import 'common.dart';
 import 'identicon.dart';
 
@@ -29,6 +30,7 @@ class PotSection extends StatefulWidget {
     required this.state,
     required this.round,
     this.onInvite,
+    this.onShareCard,
     this.onOpenYou,
   });
 
@@ -39,6 +41,9 @@ class PotSection extends StatefulWidget {
 
   /// "Invite someone", while the round is open.
   final VoidCallback? onInvite;
+
+  /// "Share card", beside "Invite someone": the round as a picture to post.
+  final VoidCallback? onShareCard;
 
   /// The "You" row was pressed: Your round, with every number about you.
   final VoidCallback? onOpenYou;
@@ -208,20 +213,49 @@ class _PotSectionState extends State<PotSection> {
             const SizedBox(height: Space.s3),
             Text(note, style: t.body(13).copyWith(color: c.text2)),
           ],
-          if (phase == _Phase.open && widget.onInvite != null) ...[
+          if (phase == _Phase.open &&
+              (widget.onInvite != null || widget.onShareCard != null)) ...[
             const SizedBox(height: Space.s3),
-            Semantics(
-              button: true,
-              label: 'Invite someone to ${round.name}',
-              excludeSemantics: true,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: widget.onInvite,
-                child: const AppChip(
-                  text: 'Invite someone',
-                  icon: Icons.ios_share_rounded,
-                ),
-              ),
+            Wrap(
+              spacing: Space.s2,
+              runSpacing: Space.s2,
+              children: [
+                // container: each chip is its own button; without it the
+                // label merges up and the whole Prize card reads as one.
+                if (widget.onInvite != null)
+                  Semantics(
+                    container: true,
+                    button: true,
+                    onTap: widget.onInvite,
+                    label: 'Invite someone to ${round.name}',
+                    excludeSemantics: true,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.onInvite,
+                      child: const AppChip(
+                        text: 'Invite someone',
+                        icon: Icons.ios_share_rounded,
+                      ),
+                    ),
+                  ),
+                if (widget.onShareCard != null)
+                  Semantics(
+                    container: true,
+                    button: true,
+                    onTap: widget.onShareCard,
+                    label: 'Share a card of ${round.name}',
+                    excludeSemantics: true,
+                    child: GestureDetector(
+                      key: const Key('pot-share-card'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.onShareCard,
+                      child: const AppChip(
+                        text: 'Share card',
+                        icon: Icons.image_outlined,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ],
@@ -263,16 +297,21 @@ class _PotSectionState extends State<PotSection> {
       );
     }
     if (pot.someoneHasNoDays) {
+      // With none of the deposits in the shop (a sponsor fills it), a
+      // deposit only ever goes to the prize.
+      final into = widget.round.liquidityBps == 0
+          ? 'prize'
+          : 'prize and the shop';
       if (phase == _Phase.open) {
         parts.add(
-          '0 days means no share. If the token launches, that deposit stays '
-          'in the prize and the token pool; it comes back only if the round '
-          'never launches.',
+          '0 days = nothing. If the coin launches, that deposit stays in the '
+          '$into; it comes back (with Refund) only if there is no launch by '
+          'the deadline.',
         );
       } else if (phase == _Phase.launched) {
         parts.add(
-          'A member with 0 days has no share: that deposit went to the '
-          'prize and the token pool.',
+          'A member with 0 days gets nothing: that deposit went to the '
+          '$into.',
         );
       }
     }
@@ -315,14 +354,14 @@ class _Hero extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'The token launched. These shares are final.',
+            'The coin launched. These shares are final.',
             style: t.body(16, FontWeight.w600),
           ),
           const SizedBox(height: 6),
           Text(
-            'Each amount is that member\'s part of the prize and of the '
-            'trading tax the vault has received so far. The same share of '
-            'half the token supply goes with it.',
+            'Each amount is that member\'s part of the prize and of the tax '
+            'money the piggy bank has received so far. The same share of the '
+            'piggy bank\'s 500,000 coins goes with it.',
             style: quiet,
           ),
         ],
@@ -330,8 +369,8 @@ class _Hero extends StatelessWidget {
     }
     if (phase == _Phase.ended) {
       return Text(
-        'This round closed without a launch. Every deposit goes back in '
-        'full, so nothing is shared.',
+        'No launch by the deadline, so nothing is shared. Each member '
+        'presses Refund to get their whole deposit back.',
         style: t.body(15),
       );
     }
@@ -351,7 +390,10 @@ class _Hero extends StatelessWidget {
 
     final mine = pot.you;
     final member = state.isMember && mine != null;
-    final nudge = !member
+    // A Season before its first check-in day (or after its last): there is
+    // no check-in to nudge towards today.
+    final waiting = state.round?.season?.checkInRefusal(state.now) != null;
+    final nudge = !member || waiting
         ? null
         : state.checkedInToday
         ? const _Nudge(
@@ -433,7 +475,7 @@ class _Hero extends StatelessWidget {
           '${mine.days} of ${formatCount(pot.total)} check-ins '
           '${mine.days == 1 ? 'is' : 'are'} yours: '
           '${formatShare(mine.days, pot.total)} of the prize and of the '
-          'token share.',
+          'piggy bank\'s coins.',
           style: t.body(14),
         ),
         if (needs != null) ...[
@@ -537,13 +579,12 @@ class _RowTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.type;
     final c = context.colors;
-    const usd = AppConfig.quoteSymbol;
     final name = row.isYou ? 'You' : friendlyName(row.address);
     final none = row.days == 0 || total == 0;
     final amount = switch (phase) {
       _Phase.ended => null,
-      _Phase.open => none ? 'nothing yet' : formatMoney(row.amount, usd),
-      _Phase.launched => none ? 'nothing' : formatMoney(row.amount, usd),
+      _Phase.open => none ? 'nothing yet' : formatTestUsd(row.amount),
+      _Phase.launched => none ? 'nothing' : formatTestUsd(row.amount),
     };
     final said = switch (phase) {
       _Phase.ended => '',

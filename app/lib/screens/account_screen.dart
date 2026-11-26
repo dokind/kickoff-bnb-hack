@@ -625,10 +625,19 @@ class AboutSheet extends StatelessWidget {
           const FlapAttribution(),
           const SizedBox(height: Space.s2),
           Text(
-            'A round creates its token through Flap Pool Launch on BNB '
+            'A round creates its coin through Flap Pool Launch on BNB '
             'Smart Chain testnet. ${AppConfig.productName} is a hackathon '
             'project and is not run or endorsed by Flap.',
             style: t.body(14).copyWith(color: c.text2),
+          ),
+          const SizedBox(height: Space.s3),
+          // Steps are the only stamp today (Apple Health, Health Connect,
+          // typed on the web): the other clubs need other stamps first.
+          Text(
+            'Running is the first club. It works for any group where showing '
+            'up can be stamped.',
+            key: const Key('about-any-club'),
+            style: t.body(14, FontWeight.w600),
           ),
           const SizedBox(height: Space.s3),
           Text(
@@ -636,7 +645,8 @@ class AboutSheet extends StatelessWidget {
             'wallet moved enough on a day, from phone health data or, in a '
             'browser, from what the person typed. It cannot launch early, '
             'block a launch, choose who is paid beyond signing daily '
-            'check-ins, or move funds.',
+            'check-ins, or move funds. If it stops, the bar never fills and '
+            'everyone gets a refund.',
             style: t.body(14).copyWith(color: c.text2),
           ),
         ],

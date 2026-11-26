@@ -10,6 +10,7 @@ import 'services/health_service.dart';
 import 'services/verifier_api.dart';
 import 'services/wallet_store.dart';
 import 'util/format.dart';
+import 'util/season_text.dart';
 import 'widgets/gauges.dart' show DayState;
 
 /// What Home's one primary action is right now.
@@ -86,7 +87,7 @@ class ActionSteps {
   static const send = 'Start the round on chain';
   static const launchOnFlap = 'Launch on Flap';
   static const readResult = 'Read the result';
-  static const claimVault = 'Claim from the vault';
+  static const claimVault = 'Claim from the piggy bank';
   static const takeBack = 'Take your deposit back';
   static const updateBalance = 'Update your balance';
 }
@@ -294,6 +295,11 @@ class AppState extends ChangeNotifier {
 
   /// The round a link asked for, until the rounds are read.
   String? _linked;
+
+  /// The round a link asked for (`/r/<launcher>`), until the rounds are
+  /// read. Before there is a wallet this is the round the visitor was
+  /// invited to, which the first-run step names.
+  String? get linkedRound => _linked;
 
   /// The round the person last chose, kept between launches.
   String? _remembered;
@@ -830,6 +836,10 @@ class AppState extends ChangeNotifier {
       if (_listed(wanted) != null) {
         selected = wanted;
       } else {
+        // Dropped from this device's rounds: the server said our factory
+        // never made it (404), in this read or in one that was already
+        // running when the link was opened.
+        missing = missing || !_known.containsKey(wanted);
         notice = missing
             ? 'That link does not lead to a round.'
             : 'That round could not be opened yet. Try the link again in a '
@@ -1192,8 +1202,14 @@ class AppState extends ChangeNotifier {
   /// store on a phone, [selfReported] in a browser or when typed on a phone
   /// as source "self"), then records the day on chain with the attester's
   /// signature. Returns the transaction hash.
+  ///
+  /// A Season round before its first check-in day or after its last: the
+  /// server signs nothing then, so nothing is asked of it (nor of the
+  /// faucet, nor of the chain) and the one sentence says when.
   Future<String> checkIn({int? selfReported, String? launcher}) async {
     final r = _acting(launcher);
+    final refusal = r.season?.checkInRefusal(now);
+    if (refusal != null) throw Exception(refusal);
     await ensureGas(AppConfig.smallGasWei);
     var ticket = _pendingTicketFor(r);
     if (ticket == null) {
@@ -1269,7 +1285,9 @@ class AppState extends ChangeNotifier {
     final r = _acting(launcher);
     final vault = _views[r.id]?.share?.vault ?? r.vault;
     if (vault == null) {
-      throw Exception('The vault is not ready yet. Try again in a moment.');
+      throw Exception(
+        'The piggy bank is not ready yet. Try again in a moment.',
+      );
     }
     return _withSteps(
       StepAction.claim,

@@ -1,11 +1,16 @@
 // Many rounds: the server calls under /rounds, the order of Home's slider,
 // which round is selected and remembered, rounds opened by link, unlisted
-// rounds and their registration, and the fallback to a server that knows
-// one round only.
+// rounds and their registration, the fallback to a server that knows one
+// round only, and a Season's squads (its dates, its join window and size,
+// its words, and the check-in it refuses before asking anyone).
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pacepact/app_state.dart';
 import 'package:pacepact/config.dart';
 import 'package:pacepact/services/verifier_api.dart';
+import 'package:pacepact/util/format.dart';
+import 'package:pacepact/util/season_text.dart';
 
 import 'support.dart';
 
@@ -397,6 +402,22 @@ void main() {
       },
     );
 
+    test('an address that is not a round, opened while a read is running: '
+        'still "does not lead to a round"', () async {
+      // A web link opens as the app starts: the first read is already
+      // running when the link is handled, and it is that read which hears
+      // the 404.
+      final store = MemoryStore(key: testKey, onboarded: true);
+      final state = await makeState(server: FakeServer(), store: store);
+      final running = state.refresh();
+      final link = state.openLink(launcherD);
+      await running;
+      await link;
+      expect(state.selected, launcher);
+      expect(state.notice, 'That link does not lead to a round.');
+      expect(state.knownRound(launcherD), isNull);
+    });
+
     test('before there is a wallet the link is kept for after', () async {
       final server = fourRounds()..unlisted.add(launcherC);
       final store = MemoryStore();
@@ -614,6 +635,336 @@ void main() {
       await state.refresh();
       expect(state.legacyServer, isTrue);
       expect(ids(state), [launcher]);
+    });
+  });
+
+  group('a Season', () {
+    Season season1() => Season.fromJson(seasonJson())!;
+
+    /// Noon UTC on the contract's day [day].
+    DateTime noon(int day) => utcDayStart(day).add(const Duration(hours: 12));
+
+    test('read with the round that is a squad of it, and only then', () {
+      final s = Round.fromJson(seasonRoundJson()).season!;
+      expect(s.name, 'Season 1');
+      expect([s.startDay, s.endDay, s.joinUntilDay], [20788, 20817, 20794]);
+      expect(s.squadSize, 10);
+      expect(s.dayCount, 30);
+      expect(s.startsAt, DateTime.utc(2026, 12, 1));
+      expect(s.lastDay, DateTime.utc(2026, 12, 30));
+      expect(s.joinUntil, DateTime.utc(2026, 12, 7));
+
+      // The live server sends no season yet: the round simply has none.
+      expect(roundJson().containsKey('season'), isFalse);
+      expect(Round.fromJson(roundJson()).season, isNull);
+      expect(Round.fromJson({...roundJson(), 'season': null}).season, isNull);
+      // One that makes no sense is no season either.
+      for (final bad in <Object>[
+        'Season 1',
+        3,
+        {'name': 'Season 1'},
+        {'name': 'Late', 'start': '2026-12-30', 'end': '2026-12-01'},
+        {'name': 'Leap', 'start': '2026-02-30', 'end': '2026-03-30'},
+      ]) {
+        expect(
+          Round.fromJson({...roundJson(), 'season': bad}).season,
+          isNull,
+          reason: '$bad',
+        );
+      }
+    });
+
+    test('the dates stand in for the day numbers', () {
+      final s = Season.fromJson({
+        'name': 'Season 1',
+        'start': '2026-12-01',
+        'end': '2026-12-30',
+        'joinUntil': '2026-12-07',
+        'squadSize': '10',
+      })!;
+      expect(
+        [s.startDay, s.endDay, s.joinUntilDay, s.squadSize],
+        [20788, 20817, 20794, 10],
+      );
+      // Unix seconds, or a full date and time, are read as their UTC day.
+      final other = Season.fromJson({
+        'name': 'Season 1',
+        'startDay': 1796083200, // 1 Dec 2026, 00:00 UTC
+        'endDay': '20817',
+        'joinUntil': '2026-12-07T23:59:59Z',
+      })!;
+      expect(
+        [other.startDay, other.endDay, other.joinUntilDay],
+        [20788, 20817, 20794],
+      );
+      final bangkok = Season.fromJson({
+        'name': 'Season 1',
+        'start': '2026-12-01T07:00:00+07:00',
+        'end': '2026-12-30',
+      })!;
+      expect(bangkok.startDay, 20788);
+      // No last day to join: the app offers Join until the last check-in
+      // day. No squad size: no limit.
+      final open = Season.fromJson({
+        'name': 'Open',
+        'startDay': 20788,
+        'endDay': 20817,
+      })!;
+      expect(open.joinUntilDay, 20817);
+      expect(open.squadSize, 0);
+      expect(open.squadFull(1000), isFalse);
+    });
+
+    test('a round keeps its season on the device and back', () {
+      final round = Round.fromJson(seasonRoundJson());
+      final back = Round.fromJson(
+        jsonDecode(jsonEncode(round.toJson())) as Map<String, dynamic>,
+      );
+      expect(back.season!.toJson(), round.season!.toJson());
+      expect(back.season!.toJson(), {
+        'name': 'Season 1',
+        'start': '2026-12-01',
+        'end': '2026-12-30',
+        'joinUntil': '2026-12-07',
+        'startDay': 20788,
+        'endDay': 20817,
+        'joinUntilDay': 20794,
+        'days': 30,
+        'squadSize': 10,
+      });
+      expect(back.copyWith(featured: true).season!.name, 'Season 1');
+      expect(back.liquidityBps, 0);
+      expect(back.deadline.toUtc(), DateTime.utc(2026, 12, 31, 23, 59, 59));
+      // And a round with none keeps none.
+      final plain = Round.fromJson(roundJson());
+      expect(
+        Round.fromJson(
+          jsonDecode(jsonEncode(plain.toJson())) as Map<String, dynamic>,
+        ).season,
+        isNull,
+      );
+    });
+
+    test('its days are UTC days, like the contract\'s', () {
+      final s = season1();
+      // The last second of 30 Nov is before it; the first of 1 Dec is day 1.
+      final before = DateTime.utc(2026, 11, 30, 23, 59, 59);
+      expect(s.notStarted(before), isTrue);
+      expect(s.dayNumber(before), 0);
+      expect(s.notStarted(DateTime.utc(2026, 12, 1)), isFalse);
+      expect(s.dayNumber(DateTime.utc(2026, 12, 1)), 1);
+      // 07:00 in Bangkok is that same first second.
+      expect(s.notStarted(DateTime.parse('2026-12-01T06:59:59+07:00')), isTrue);
+      expect(
+        s.notStarted(DateTime.parse('2026-12-01T07:00:00+07:00')),
+        isFalse,
+      );
+      // 30 Dec is the last check-in day; 31 Dec is after it.
+      expect(s.dayNumber(noon(20817)), 30);
+      expect(s.checkInsOver(DateTime.utc(2026, 12, 30, 23, 59, 59)), isFalse);
+      expect(s.checkInsOver(DateTime.utc(2026, 12, 31)), isTrue);
+      expect(s.dayNumber(noon(20818)), 31);
+      // Days left, today included: a joiner on 7 Dec can still reach 24.
+      expect(s.daysLeft(fixedNow), 30);
+      expect(s.daysLeft(noon(20794)), 24);
+      expect(s.daysLeft(noon(20817)), 1);
+      expect(s.daysLeft(noon(20818)), 0);
+      expect(s.daysToStart(fixedNow), 6);
+      expect(s.daysToStart(noon(20788)), 0);
+    });
+
+    test('Join in the app: until the end of 7 Dec, and up to 10', () {
+      final s = season1();
+      final lastMinute = DateTime.utc(2026, 12, 7, 23, 59, 59);
+      final dec8 = DateTime.utc(2026, 12, 8);
+      expect(s.joinClosed(fixedNow, 9), isFalse);
+      expect(s.joinClosed(fixedNow, 10), isTrue);
+      expect(s.joinClosed(lastMinute, 3), isFalse);
+      expect(s.joinClosed(dec8, 3), isTrue);
+      expect(s.joinClosedLabel(dec8), 'Joining closed 7 Dec');
+      expect(s.joinClosedLabel(fixedNow), 'Squad full');
+      expect(
+        joinStopNote,
+        'The contract still takes joins; the app stops here so everyone '
+        'starts fair.',
+      );
+    });
+
+    test('a squad that can no longer fill its bar', () {
+      final s = season1();
+      bool cannot(DateTime now, int checkIns, int members) => s.cannotFill(
+        now,
+        totalCheckIns: checkIns,
+        memberCount: members,
+        goal: 240,
+      );
+      // Before the start, joining is open: a full squad of 10 can fill 240.
+      expect(cannot(fixedNow, 0, 3), isFalse);
+      // 7 Dec, still open: 18 + 10 people x 24 days = 258.
+      expect(cannot(noon(20794), 18, 3), isFalse);
+      // 8 Dec, joining closed with 3 members: 21 + 3 x 23 = 90.
+      expect(cannot(noon(20795), 21, 3), isTrue);
+      // 8 Dec, 9 members and no day yet: 9 x 23 = 207.
+      expect(cannot(noon(20795), 0, 9), isTrue);
+      // 8 Dec, 10 members with 7 days each: 70 + 10 x 23 = 300.
+      expect(cannot(noon(20795), 70, 10), isFalse);
+      // 31 Dec: no check-in day left, one short.
+      expect(cannot(noon(20818), 239, 10), isTrue);
+      // A full bar can always launch.
+      expect(cannot(noon(20818), 240, 10), isFalse);
+      // A Season with no squad size says nothing while anyone may join.
+      final open = Season.fromJson({
+        'name': 'Open',
+        'startDay': 20788,
+        'endDay': 20817,
+      })!;
+      expect(
+        open.cannotFill(
+          noon(20800),
+          totalCheckIns: 0,
+          memberCount: 1,
+          goal: 240,
+        ),
+        isFalse,
+      );
+    });
+
+    test('its words', () {
+      final s = season1();
+      final dec7 = DateTime.utc(2026, 12, 7, 9);
+      // The refusal is the server's sentence, word for word
+      // (verifier/src/season.ts, seasonRefusal).
+      expect(
+        s.opensLine,
+        'Season 1 check-ins open Tue 1 Dec (07:00 in Bangkok). Everyone '
+        'starts at 0.',
+      );
+      expect(
+        s.endedLine,
+        'Season 1 check-ins have ended. The last day was Wed 30 Dec.',
+      );
+      expect(s.endedHint, 'Check-ins ended 30 Dec');
+      expect(s.opensHint(fixedNow), 'Check-ins open 1 Dec · in 6 days');
+      expect(
+        s.opensHint(DateTime.utc(2026, 11, 30, 20)),
+        'Check-ins open 1 Dec · in 1 day',
+      );
+      expect(s.startsLine, 'Starts Tue 1 Dec. Everyone starts at 0.');
+      expect(s.lateLine(dec7), 'Day 7 of 30: 24 days left');
+      expect(s.barBefore, 'Season 1 starts Tue 1 Dec · everyone at 0');
+      expect(
+        s.barDuring(dec7, totalCheckIns: 42, memberCount: 10, yourDays: 5),
+        'Day 7 of 30 · average 4.2 days · you 5',
+      );
+      expect(
+        s.barDuring(dec7, totalCheckIns: 10, memberCount: 10),
+        'Day 7 of 30 · average 1 day',
+      );
+      expect(
+        s.barDuring(dec7, totalCheckIns: 13, memberCount: 3, yourDays: 4),
+        'Day 7 of 30 · average 4.3 days · you 4',
+      );
+      expect(
+        s.cannotFillLine(
+          DateTime.fromMillisecondsSinceEpoch(seasonDeadline * 1000),
+        ),
+        'This squad can\'t fill now. 100% back after 31 Dec.',
+      );
+      expect(s.checkInRefusal(fixedNow), s.opensLine);
+      expect(s.checkInRefusal(DateTime.utc(2026, 12, 1)), isNull);
+      expect(s.checkInRefusal(DateTime.utc(2026, 12, 30, 23)), isNull);
+      expect(s.checkInRefusal(DateTime.utc(2026, 12, 31)), s.endedLine);
+      // The banner after a paid deposit.
+      final squad = Round.fromJson(seasonRoundJson());
+      expect(
+        joinedNote(squad, fixedNow),
+        'You\'re in. Starts Tue 1 Dec. Everyone starts at 0.',
+      );
+      expect(
+        joinedNote(squad, dec7),
+        'You\'re in. Check in today to start your share.',
+      );
+      expect(
+        joinedNote(Round.fromJson(roundJson()), fixedNow),
+        'You\'re in. Check in today to start your share.',
+      );
+    });
+
+    test(
+      'GET /rounds and GET /rounds/:launcher carry it to the state',
+      () async {
+        final server = FakeServer()
+          ..round = seasonRoundJson()
+          ..more.add(roundJson(at: launcherB, name: 'Lumpini Striders'));
+        final listed = (await server.api.rounds())!;
+        expect(listed.first.season!.name, 'Season 1');
+        expect(listed.last.season, isNull);
+        final state = await makeState(server: server);
+        expect(state.round!.season!.squadSize, 10);
+        expect(state.roundOf(launcherB)!.season, isNull);
+      },
+    );
+
+    test('before the start a check-in asks nothing of anyone', () async {
+      // No test BNB yet: without the guard the faucet would be asked first.
+      final server = FakeServer()..round = seasonRoundJson();
+      final chain = FakeChain(isMember: true, deposit: 100, bnb: 0);
+      final state = await makeState(server: server, chain: chain);
+      await pumpEventQueue();
+      server.requests.clear();
+      await expectLater(
+        state.checkIn(selfReported: 6214),
+        throwsA(
+          predicate(
+            (e) =>
+                friendlyError(e as Object) ==
+                'Season 1 check-ins open Tue 1 Dec (07:00 in Bangkok). '
+                    'Everyone starts at 0.',
+          ),
+        ),
+      );
+      // Not the server (no check-in, not even the faucet), not the chain.
+      expect(server.requests, isEmpty);
+      expect(chain.calls, isEmpty);
+      expect(state.hasPendingCheckIn, isFalse);
+    });
+
+    test('after the last check-in day it asks nothing either', () async {
+      final server = FakeServer()..round = seasonRoundJson(totalCheckIns: 200);
+      final chain = FakeChain(isMember: true, deposit: 100, daysOf: 20);
+      final state = await makeState(
+        server: server,
+        chain: chain,
+        now: DateTime.utc(2026, 12, 31, 9),
+      );
+      await pumpEventQueue();
+      server.requests.clear();
+      await expectLater(
+        state.checkIn(selfReported: 6214),
+        throwsA(
+          predicate(
+            (e) =>
+                friendlyError(e as Object) ==
+                'Season 1 check-ins have ended. The last day was Wed 30 Dec.',
+          ),
+        ),
+      );
+      expect(server.requests, isEmpty);
+      expect(chain.calls, isEmpty);
+    });
+
+    test('during the Season the check-in goes as any other', () async {
+      final server = FakeServer()..round = seasonRoundJson(totalCheckIns: 2);
+      final chain = FakeChain(isMember: true, deposit: 100);
+      final state = await makeState(
+        server: server,
+        chain: chain,
+        now: DateTime.utc(2026, 12, 1, 0, 0, 1),
+      );
+      server.requests.clear();
+      await state.checkIn(selfReported: 6214);
+      expect(server.count('POST /rounds/$launcher/checkin'), 1);
+      expect(chain.calls, ['checkIn 20782']);
     });
   });
 }

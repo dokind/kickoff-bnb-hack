@@ -25,7 +25,7 @@ import 'package:pacepact/widgets/round_slider.dart';
 
 import 'support.dart';
 
-/// "Demo Day" (featured, a 500 USD deposit) and two more rounds.
+/// "Demo Day" (featured, a 500 test USD deposit) and two more rounds.
 FakeServer threeRounds() => FakeServer()
   ..round = (roundJson(name: 'Demo Day')..['deposit'] = '500')
   ..more.addAll([
@@ -624,7 +624,7 @@ void main() {
       await settle(tester);
       expect(namedIn(tester, ResultScreen), 'Demo Day');
       final name = tester.getRect(find.byType(RoundLabel));
-      final title = tester.getRect(find.text('THE TOKEN\nIS LIVE.'));
+      final title = tester.getRect(find.text('THE COIN\nIS LIVE.'));
       expect(name.bottom, lessThanOrEqualTo(title.top));
     });
   });
@@ -704,17 +704,17 @@ void main() {
       final state = await makeState(server: server, chain: chain);
       await pumpHome(tester, state);
 
-      await tester.tap(action('Sponsor the token pool'));
+      await tester.tap(action('Sponsor the shop'));
       await settle(tester, 14);
       expect(namedIn(tester, SponsorSheet), 'Demo Day');
       state.select(launcherB);
       await settle(tester, 14);
-      await tester.tap(action('Add to the token pool'));
+      await tester.tap(action('Add to the shop'));
       await settle(tester, 14);
       expect(chain.asked, [launcher]);
       expect(chain.calls, ['mint 600', 'sponsor 600']);
       // The sheet's own words for it, as on its title and its button.
-      expect(bannerNote.value!.text, '600 USD added to the token pool.');
+      expect(bannerNote.value!.text, '600 test USD added to the shop money.');
     });
 
     testWidgets('a press that began on one round never lands on another', (

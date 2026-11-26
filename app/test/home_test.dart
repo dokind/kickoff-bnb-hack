@@ -2,6 +2,7 @@
 // prize, the order of the sections, what a launch still needs and the
 // states with no round to show.
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pacepact/app_state.dart';
 import 'package:pacepact/screens/home_screen.dart';
@@ -10,6 +11,7 @@ import 'package:pacepact/widgets/common.dart';
 import 'package:pacepact/widgets/dot_matrix.dart';
 import 'package:pacepact/widgets/gauges.dart';
 import 'package:pacepact/widgets/launch_floor_line.dart';
+import 'package:pacepact/widgets/streak_block.dart';
 
 import 'support.dart';
 
@@ -132,7 +134,7 @@ void main() {
     expect(action('Launch Morning Movers'), findsOneWidget);
     expect(enabled(tester, 'Launch Morning Movers'), isTrue);
     expect(
-      find.text('The bar is full. Anyone can launch the token now.'),
+      find.text('The bar is full. Anyone can launch the coin now.'),
       findsOneWidget,
     );
 
@@ -141,7 +143,7 @@ void main() {
     expect(chain.calls, ['launch']);
     // The same screen moves on to the result.
     expect(action('See the result · Morning Movers'), findsOneWidget);
-    expect(bannerNote.value!.text, 'Launched. The token is live.');
+    expect(bannerNote.value!.text, 'Launched. The coin is live.');
     bannerNote.value = null;
   });
 
@@ -158,14 +160,14 @@ void main() {
     expect(enabled(tester, 'Launch Morning Movers'), isFalse);
     expect(
       find.text(
-        'The bar is full, but the token pool is 600 test USD short of what Flap '
-        'needs.',
+        'The bar is full, but the shop money is 600 test USD short of what '
+        'Flap needs.',
       ),
       findsOneWidget,
     );
-    await tester.tap(action('Sponsor the token pool'));
+    await tester.tap(action('Sponsor the shop'));
     await settle(tester, 10);
-    expect(find.text('Sponsor the token pool'), findsNWidgets(2));
+    expect(find.text('Sponsor the shop'), findsNWidgets(2));
     // The sheet starts with what is missing.
     expect(
       tester
@@ -174,7 +176,7 @@ void main() {
           .text,
       '600',
     );
-    await tester.tap(action('Add to the token pool'));
+    await tester.tap(action('Add to the shop'));
     await settle(tester, 10);
     expect(chain.calls, ['mint 600', 'sponsor 600']);
     expect(enabled(tester, 'Launch Morning Movers'), isTrue);
@@ -220,9 +222,9 @@ void main() {
     expect(action('Claim · Morning Movers'), findsOneWidget);
     expect(enabled(tester, 'Claim · Morning Movers'), isTrue);
     await showStreak(tester);
-    expect(find.text('Token launched'), findsOneWidget);
+    expect(find.text('Coin launched'), findsOneWidget);
     expect(
-      find.text('The token launched. Your share is waiting in the vault.'),
+      find.text('The coin launched. Your share is in the piggy bank.'),
       findsOneWidget,
     );
   });
@@ -246,6 +248,7 @@ void main() {
     final state = await makeState(now: DateTime.utc(2026, 12, 3), chain: chain);
     await pumpHome(tester, state);
 
+    await showStreak(tester);
     expect(find.text('Round ended'), findsOneWidget); // the badge
     await tester.tap(action('Deposit back · Morning Movers'));
     await settle(tester);
@@ -293,7 +296,7 @@ void main() {
     expect(find.text('THE BAR'), findsOneWidget);
     expect(find.text('3 / 6 check-ins'), findsOneWidget);
     expect(find.text('Closes 2 Dec 2026'), findsOneWidget);
-    expect(find.text('Prize so far 2,100 USD'), findsOneWidget);
+    expect(find.text('Prize 2,100 test USD'), findsOneWidget);
     // On the card only: THE PRIZE right under it does not say it again.
     expect(find.text('3 members'), findsOneWidget);
     expect(find.text('You\'re in'), findsOneWidget);
@@ -308,13 +311,13 @@ void main() {
     expect(find.text('THE PRIZE'), findsOneWidget);
     expect(find.text('0x2000…0002'), findsOneWidget);
     expect(find.text('2 days'), findsOneWidget);
-    expect(find.text('1,400 USD'), findsOneWidget);
+    expect(find.text('1,400 test USD'), findsOneWidget);
     expect(find.text('1 day'), findsOneWidget);
-    expect(find.text('700 USD'), findsOneWidget);
+    expect(find.text('700 test USD'), findsOneWidget);
 
     // The prize so far, in dot-matrix numerals.
     await tester.scrollUntilVisible(
-      find.text('TOKEN POOL'),
+      find.text('SHOP MONEY'),
       200,
       scrollable: list,
     );
@@ -323,31 +326,48 @@ void main() {
       tester.widget<DotMatrixText>(find.byType(DotMatrixText)).text,
       '2,100',
     );
-    expect(find.text('TOKEN POOL'), findsOneWidget);
+    expect(find.text('SHOP MONEY'), findsOneWidget);
     expect(find.text('900'), findsOneWidget);
     expect(find.text('of 1,500 test USD Flap needs'), findsOneWidget);
 
     // What the server can and cannot do is said plainly.
     await tester.scrollUntilVisible(
-      find.textContaining('attested by Cypher Run\'s server, not proven'),
+      find.textContaining('signed by Cypher Run\'s server, not proven'),
       200,
       scrollable: list,
     );
     expect(
-      find.textContaining('cannot launch early, block a launch or move funds'),
+      find.textContaining('cannot move money, launch early or block a launch'),
       findsOneWidget,
     );
-    // A full bar alone does not launch: the token pool floor is said too.
+    // A full bar alone does not launch: Flap's floor for the shop money is
+    // said too.
     expect(
       find.text(
-        'Launch needs both: 6 check-ins and 1,500 test USD in the token '
-        'pool. Then anyone can launch it on Flap.',
+        'Bar full (6 check-ins) and 1,500 test USD of shop money (Flap\'s '
+        'floor)? Then anyone can press Launch.',
       ),
       findsOneWidget,
     );
+    // What a launch makes, where the coins go, the tax, the split and the
+    // refund, in plain words.
+    for (final line in [
+      'Launch makes 1,000,000 new coins on Flap: half go into the shop with '
+          'the shop money, half into the group\'s piggy bank. The shop is '
+          'locked forever (LP burned).',
+      'For 30 days each trade pays a tax: 3% on buys, 5% on sells. 80% goes '
+          'to the piggy bank, 20% is burned.',
+      'The prize and the piggy bank are split by days: your days ÷ all '
+          'days, frozen at launch. 0 days = nothing.',
+    ]) {
+      expect(find.text(line), findsOneWidget, reason: line);
+    }
     expect(
-      find.textContaining('anyone can launch the token on Flap'),
-      findsNothing,
+      find.textContaining(
+        'Each member presses Refund and gets back exactly '
+        'what they paid. Sponsors too.',
+      ),
+      findsOneWidget,
     );
   });
 
@@ -421,10 +441,10 @@ void main() {
     });
   });
 
-  group('launch also needs the token pool', () {
+  group('launch also needs the shop money', () {
     const fiveMore =
-        'Launch also needs 1,500 test USD in the token pool: about 5 more '
-        'members at this deposit, or a sponsor.';
+        'Launch also needs 1,500 test USD of shop money (Flap\'s floor): about '
+        '5 more members at this deposit, or a sponsor.';
 
     testWidgets('under THE PRIZE, above the streak, while the pool is short', (
       tester,
@@ -452,14 +472,14 @@ void main() {
         // 600 short: two more members at 300 each.
         expect(
           floorLine(await makeState(chain: FakeChain(pool: 900))),
-          'Launch also needs 1,500 test USD in the token pool: about 2 more '
-          'members at this deposit, or a sponsor.',
+          'Launch also needs 1,500 test USD of shop money (Flap\'s floor): '
+          'about 2 more members at this deposit, or a sponsor.',
         );
         // 1 short: one more member.
         expect(
           floorLine(await makeState(chain: FakeChain(pool: 1499))),
-          'Launch also needs 1,500 test USD in the token pool: about 1 more '
-          'member at this deposit, or a sponsor.',
+          'Launch also needs 1,500 test USD of shop money (Flap\'s floor): '
+          'about 1 more member at this deposit, or a sponsor.',
         );
         // A round whose deposit adds nothing to the pool.
         expect(
@@ -469,8 +489,8 @@ void main() {
               server: FakeServer()..round = {...roundJson(), 'liquidityBps': 0},
             ),
           ),
-          'Launch also needs 1,500 test USD in the token pool. In this round '
-          'a deposit adds nothing to it, so it takes a sponsor.',
+          'Launch also needs 1,500 test USD of shop money (Flap\'s floor). In '
+          'this round a deposit adds nothing to it, so it takes a sponsor.',
         );
       },
     );
@@ -620,5 +640,136 @@ void main() {
     expect(CenteredColumn.maxWidth, 480);
     // The aurora still covers the whole window.
     expect(tester.getSize(find.byType(AuroraBackground)).width, 1280);
+  });
+
+  group('a Season squad', () {
+    testWidgets('before the start: the hint says when check-ins open', (
+      tester,
+    ) async {
+      final server = FakeServer()
+        ..round = seasonRoundJson()
+        ..members = const [];
+      final chain = FakeChain(isMember: true, deposit: 100, pool: 1500);
+      final state = await makeState(server: server, chain: chain);
+      await pumpHome(tester, state);
+
+      // The hint over the action, and the streak's state, say when.
+      expect(find.text('Check-ins open 1 Dec · in 6 days'), findsWidgets);
+      expect(action('Check in · Season 1 Squad A'), findsOneWidget);
+      // THE PRIZE has no "check in today" before the start.
+      expect(find.textContaining('Check in today'), findsNothing);
+      await showStreak(tester);
+      expect(find.text('Not checked in today'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(StreakBlock),
+          matching: find.text('Check-ins open 1 Dec · in 6 days'),
+        ),
+        findsOneWidget,
+      );
+      // Pressed anyway: the reason, no sheet, nothing sent.
+      server.requests.clear();
+      await tester.tap(action('Check in · Season 1 Squad A'));
+      await settle(tester, 10);
+      expect(
+        bannerNote.value!.text,
+        'Season 1 check-ins open Tue 1 Dec (07:00 in Bangkok). Everyone '
+        'starts at 0.',
+      );
+      expect(find.text('Check in today'), findsNothing);
+      expect(server.requests.where((r) => r.startsWith('POST')), isEmpty);
+      expect(chain.calls, isEmpty);
+      bannerNote.value = null;
+    });
+
+    testWidgets('open to join: the usual Join, with its deposit', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: FakeServer()..round = seasonRoundJson(memberCount: 9),
+        chain: FakeChain(deposit: 100, pool: 1500),
+      );
+      await pumpHome(tester, state);
+      expect(action('Join Season 1 Squad A · 100 USD'), findsOneWidget);
+      expect(enabled(tester, 'Join Season 1 Squad A · 100 USD'), isTrue);
+    });
+
+    testWidgets('full: Home offers no Join, and says why', (tester) async {
+      final state = await makeState(
+        server: FakeServer()..round = seasonRoundJson(memberCount: 10),
+        chain: FakeChain(deposit: 100, pool: 1500),
+      );
+      await pumpHome(tester, state);
+      expect(action('Squad full'), findsOneWidget);
+      expect(enabled(tester, 'Squad full'), isFalse);
+      expect(
+        find.text(
+          'The contract still takes joins; the app stops here so everyone '
+          'starts fair.',
+        ),
+        findsOneWidget,
+      );
+      expect(action('Join Season 1 Squad A · 100 USD'), findsNothing);
+    });
+
+    testWidgets(
+      'after 30 Dec: one short line, the server\'s words on a press',
+      (tester) async {
+        final server = FakeServer()
+          ..round = seasonRoundJson(totalCheckIns: 230, memberCount: 10);
+        final chain = FakeChain(
+          isMember: true,
+          deposit: 100,
+          pool: 1500,
+          daysOf: 25,
+          totalCheckIns: 230,
+        );
+        final state = await makeState(
+          server: server,
+          chain: chain,
+          now: DateTime.utc(2026, 12, 31, 3),
+        );
+        await pumpHome(tester, state);
+
+        // The hint over the action and the streak's badge (one line, cut with
+        // an ellipsis when too long) say it in a few words.
+        expect(find.text('Check-ins ended 30 Dec'), findsWidgets);
+        expect(action('Check in · Season 1 Squad A'), findsOneWidget);
+        await showStreak(tester);
+        final badge = find.descendant(
+          of: find.byType(StreakBlock),
+          matching: find.text('Check-ins ended 30 Dec'),
+        );
+        expect(badge, findsOneWidget);
+        expect(
+          tester.renderObject<RenderParagraph>(badge).didExceedMaxLines,
+          isFalse,
+        );
+
+        // Pressed anyway: the server's own sentence, no sheet, nothing sent.
+        server.requests.clear();
+        await tester.tap(action('Check in · Season 1 Squad A'));
+        await settle(tester, 10);
+        expect(
+          bannerNote.value!.text,
+          'Season 1 check-ins have ended. The last day was Wed 30 Dec.',
+        );
+        expect(server.requests.where((r) => r.startsWith('POST')), isEmpty);
+        expect(chain.calls, isEmpty);
+        bannerNote.value = null;
+      },
+    );
+
+    testWidgets('after 7 Dec: "Joining closed 7 Dec"', (tester) async {
+      final state = await makeState(
+        server: FakeServer()
+          ..round = seasonRoundJson(totalCheckIns: 70, memberCount: 10),
+        chain: FakeChain(deposit: 100, pool: 1500, totalCheckIns: 70),
+        now: DateTime.utc(2026, 12, 8, 9),
+      );
+      await pumpHome(tester, state);
+      expect(action('Joining closed 7 Dec'), findsOneWidget);
+      expect(enabled(tester, 'Joining closed 7 Dec'), isFalse);
+    });
   });
 }

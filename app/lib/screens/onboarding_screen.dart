@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../widgets/common.dart';
@@ -27,6 +30,30 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   int _step = 0;
   bool _busy = false;
+
+  /// The round a link sent this visitor to, once it has been read: the
+  /// first step names it and its deposit instead of a general line.
+  Round? _invite;
+
+  @override
+  void initState() {
+    super.initState();
+    // After the router's own microtask, which records the link.
+    unawaited(Future.microtask(_readInvite));
+  }
+
+  Future<void> _readInvite() async {
+    final id = widget.state.linkedRound;
+    if (id == null) return;
+    try {
+      final r = await widget.state.api
+          .roundAt(id)
+          .timeout(const Duration(seconds: 8));
+      if (mounted && r != null) setState(() => _invite = r);
+    } catch (_) {
+      // The general line stays; Home opens the round after this step.
+    }
+  }
 
   Future<void> _start() async {
     setState(() => _busy = true);
@@ -78,7 +105,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ? const Duration(milliseconds: 400)
           : Duration.zero,
       child: _step == 0
-          ? _Welcome(key: const ValueKey(0), busy: _busy, onStart: _start)
+          ? _Welcome(
+              key: const ValueKey(0),
+              busy: _busy,
+              invite: _invite,
+              onStart: _start,
+            )
           : _HealthStep(
               key: const ValueKey(1),
               busy: _busy,
@@ -115,9 +147,29 @@ class _FillScroll extends StatelessWidget {
 }
 
 class _Welcome extends StatefulWidget {
-  const _Welcome({super.key, required this.busy, required this.onStart});
+  const _Welcome({
+    super.key,
+    required this.busy,
+    required this.onStart,
+    this.invite,
+  });
   final bool busy;
   final VoidCallback onStart;
+
+  /// The round a link sent this visitor to, when there is one.
+  final Round? invite;
+
+  /// The line under the hero: the invited round and its deposit, or what
+  /// any round asks.
+  static String lineFor(Round? invite) {
+    final name = invite?.name.trim() ?? '';
+    if (invite == null || name.isEmpty) {
+      return 'Put in a test deposit. Show up each day. Split the prize with '
+          'everyone who did.';
+    }
+    return 'You\'re invited to $name. Put in ${formatTestUsd(invite.deposit)}, '
+        'show up each day, and split the prize with everyone who did.';
+  }
 
   @override
   State<_Welcome> createState() => _WelcomeState();
@@ -196,8 +248,8 @@ class _WelcomeState extends State<_Welcome>
             FadeTransition(
               opacity: shown,
               child: Text(
-                'Put in 500. Show up each day. Split the prize with everyone '
-                'who did.',
+                _Welcome.lineFor(widget.invite),
+                key: const Key('welcome-line'),
                 style: t.body(16).copyWith(color: c.text2),
               ),
             ),

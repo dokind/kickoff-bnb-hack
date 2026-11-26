@@ -9,9 +9,8 @@ import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
-import 'controls.dart';
+import 'common.dart';
 import 'gauges.dart';
-import 'glass.dart';
 import 'identicon.dart';
 
 /// What one round's card shows. The numbers of the selected round come from
@@ -390,7 +389,6 @@ class RoundSliderState extends State<RoundSlider> {
                 ),
               ),
             ),
-            const SizedBox(height: Space.s2),
             _Dots(count: cards.length, index: widget.index, onTap: _goTo),
           ],
         ),
@@ -399,53 +397,66 @@ class RoundSliderState extends State<RoundSlider> {
   }
 }
 
-/// One dot per card; the selected one is a short volt bar.
+/// One dot per card; the selected one is a short volt bar. Each dot sits
+/// in a 44 pt tall tap target, as wide as the row allows up to 44 pt.
 class _Dots extends StatelessWidget {
   const _Dots({required this.count, required this.index, required this.onTap});
   final int count;
   final int index;
   final ValueChanged<int> onTap;
 
+  /// The smallest comfortable tap target, in logical pixels.
+  static const double target = 44;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return Row(
-      key: const Key('round-dots'),
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var i = 0; i < count; i++)
-          Semantics(
-            button: true,
-            selected: i == index,
-            label: 'Round ${i + 1} of $count',
-            excludeSemantics: true,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => onTap(i),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 10,
-                ),
-                child: AnimatedContainer(
-                  key: Key('round-dot-$i'),
-                  duration: context.motion
-                      ? const Duration(milliseconds: 250)
-                      : Duration.zero,
-                  curve: Curves.easeOut,
-                  width: i == index ? 20 : 7,
-                  height: 7,
-                  decoration: ShapeDecoration(
-                    shape: const StadiumBorder(),
-                    color: i == index
-                        ? c.volt
-                        : Colors.white.withValues(alpha: 0.22),
+    return LayoutBuilder(
+      builder: (context, box) {
+        final room = box.maxWidth.isFinite && count > 0
+            ? box.maxWidth / count
+            : target;
+        final width = room < target ? room : target;
+        return Row(
+          key: const Key('round-dots'),
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var i = 0; i < count; i++)
+              Semantics(
+                button: true,
+                selected: i == index,
+                label: 'Round ${i + 1} of $count',
+                excludeSemantics: true,
+                child: GestureDetector(
+                  key: Key('round-dot-target-$i'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onTap(i),
+                  child: SizedBox(
+                    width: width,
+                    height: target,
+                    child: Center(
+                      child: AnimatedContainer(
+                        key: Key('round-dot-$i'),
+                        duration: context.motion
+                            ? const Duration(milliseconds: 250)
+                            : Duration.zero,
+                        curve: Curves.easeOut,
+                        width: i == index ? 20 : 7,
+                        height: 7,
+                        decoration: ShapeDecoration(
+                          shape: const StadiumBorder(),
+                          color: i == index
+                              ? c.volt
+                              : Colors.white.withValues(alpha: 0.22),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -639,8 +650,8 @@ class RoundCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          'Prize so far '
-                          '${formatMoney(round.prizeNow, AppConfig.quoteSymbol, maxFraction: 0)}',
+                          'Prize '
+                          '${formatTestUsd(round.prizeNow, maxFraction: 0)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: quiet.copyWith(color: c.text),

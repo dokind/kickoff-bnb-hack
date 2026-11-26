@@ -11,12 +11,14 @@ import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../util/next_action.dart';
 import '../util/pot.dart';
+import '../util/season_text.dart';
 import '../widgets/common.dart';
 import '../widgets/gauges.dart';
 import '../widgets/identicon.dart';
 import '../widgets/round_parts.dart';
 import 'checkin_sheet.dart';
 import 'join_sheet.dart';
+import 'share_sheet.dart';
 
 /// Your round (`/round/<launcher>`): one round from a member's side, in
 /// plain numbers. Opened from a round card that says "You're in" on Home,
@@ -171,7 +173,15 @@ class _RoundScreenState extends State<RoundScreen> {
                             onPressed: _back,
                           ),
                           const SizedBox(width: Space.s3),
-                          const Overline('Your round'),
+                          const Expanded(child: Overline('Your round')),
+                          if (round != null)
+                            GlassIconButton(
+                              key: const Key('round-share'),
+                              icon: Icons.ios_share_rounded,
+                              tooltip: 'Share this round',
+                              onPressed: () =>
+                                  showShareSheet(context, _state, round),
+                            ),
                         ],
                       ),
                       const SizedBox(height: Space.s5),
@@ -298,7 +308,7 @@ class _RoundScreenState extends State<RoundScreen> {
         _hero(round, money),
       if (member) ...[
         const SizedBox(height: Space.s6),
-        YourMoneyCard(lines: _ledger(money), joinTx: s.joinTxOf(_id)),
+        YourMoneyCard(lines: _ledger(round, money), joinTx: s.joinTxOf(_id)),
         const SizedBox(height: Space.s6),
         HowItEnds(cards: _endings(round, money), now: ending),
         const SizedBox(height: Space.s6),
@@ -325,7 +335,7 @@ class _RoundScreenState extends State<RoundScreen> {
           label: back ? 'Your deposit' : 'You were not in this round',
           amount: back ? formatAmount(money.deposit) : '0',
           unit: back ? '$testUsd, back in your wallet' : testUsd,
-          line: back ? null : 'Only members share the prize and the token.',
+          line: back ? null : 'Only members share the prize and the coins.',
         );
       }
       return WhatYouGet(
@@ -334,7 +344,7 @@ class _RoundScreenState extends State<RoundScreen> {
         unit: '$testUsd deposit',
         line:
             'Every day you show up is one more part of the prize and of the '
-            'token.',
+            'coins.',
       );
     }
     if (s.launched) {
@@ -342,21 +352,21 @@ class _RoundScreenState extends State<RoundScreen> {
       final tokens = s.claimableTokens + s.claimedTokens;
       if (money.days == 0) {
         return const WhatYouGet(
-          label: 'The token launched',
+          label: 'The coin launched',
           amount: '0',
           line: 'You had 0 days at launch, so nothing comes back.',
         );
       }
       return WhatYouGet(
-        label: 'Yours from the vault so far',
+        label: 'Yours from the piggy bank',
         amount: formatAmount(quote),
         line:
-            'and ${formatAmount(tokens)} tokens: $share of the members\' half '
-            'of the token',
+            'and ${formatAmount(tokens)} coins: $share of the piggy bank\'s '
+            '500,000 coins',
         note: s.hasClaimable
             ? '${formatTestUsd(s.claimableQuote)} of it is waiting for you to '
-                  'claim. Trading tax keeps adding to it.'
-            : 'All claimed so far. Trading tax keeps adding to it.',
+                  'claim. $taxLine'
+            : 'All claimed so far. $taxLine',
       );
     }
     if (s.pastDeadline) {
@@ -364,43 +374,50 @@ class _RoundScreenState extends State<RoundScreen> {
       return WhatYouGet(
         label: 'Comes back to you',
         amount: formatAmount(back),
-        line: 'Your whole deposit: the round did not launch in time.',
+        line: 'Your whole deposit: there was no launch by the deadline.',
       );
     }
+    // A Season before its first check-in day (or after its last): there is
+    // no check-in to call for.
+    final noCheckIn =
+        s.checkedInToday || round.season?.checkInRefusal(s.now) != null;
     if (money.days == 0) {
       return WhatYouGet(
         label: 'If it launched now, you\'d get',
         amount: '0',
         unit: '$testUsd so far',
-        call: s.checkedInToday ? null : 'Check in today to earn a share.',
-        note: 'A member with 0 days at launch gets nothing back.',
+        call: noCheckIn ? null : 'Check in today to earn a share.',
+        note: '0 days at launch = nothing back.',
       );
     }
     return WhatYouGet(
       label: 'If it launched now, you\'d get',
       amount: formatAmount(money.projected),
-      line: 'and $share of the members\' half of the token',
-      call: s.checkedInToday ? null : shareNudge(money.days, money.total),
+      line: 'and $share of the piggy bank\'s 500,000 coins',
+      call: noCheckIn ? null : shareNudge(money.days, money.total),
       note:
-          'A projection: the prize split by today\'s check-ins. Every '
-          'check-in until the launch changes it.',
+          'A guess: the prize split by today\'s days. Every check-in until '
+          'the launch changes it. Shares freeze at launch.',
     );
   }
 
   /// YOUR MONEY, row by row.
-  List<LedgerLine> _ledger(YourMoney money) {
+  List<LedgerLine> _ledger(Round round, YourMoney money) {
     final s = _state;
     final closed = !s.launched && s.pastDeadline;
     return [
       LedgerLine('Deposit paid', formatTestUsd(money.deposit)),
       LedgerLine(
-        'Goes to the token pool',
+        'Goes into the shop',
         formatTestUsd(money.toPool),
-        detail: s.launched
-            ? 'In the token pool for good'
+        // None of the deposits goes in: the shop is sponsor money only.
+        detail: round.liquidityBps == 0
+            ? 'None: a sponsor fills the shop'
+            : s.launched
+            ? 'Locked in the shop forever'
             : closed
             ? 'Comes back with Refund'
-            : 'For good once it launches',
+            : 'Locked in the shop at launch',
       ),
       LedgerLine(
         'Goes to the prize',
@@ -426,18 +443,17 @@ class _RoundScreenState extends State<RoundScreen> {
     final String withDays;
     if (money.days == 0) {
       withDays =
-          'You get a share of the prize and of the members\' half of the '
-          'token by your days. Claim it on the result screen.';
+          'You get a share of the prize and of the piggy bank\'s coins by '
+          'your days. Claim it on the result screen.';
     } else if (s.launched) {
       withDays =
           'You get ${formatTestUsd(s.claimableQuote + s.claimedQuote)} so far '
-          'and $share of the members\' half of the token. Claim it on the '
-          'result screen.';
+          'and $share of the piggy bank\'s coins. Claim it on the result '
+          'screen.';
     } else {
       withDays =
           'If it launched now: ${formatTestUsd(money.projected)} and $share '
-          'of the members\' half of the token. Claim it on the result '
-          'screen.';
+          'of the piggy bank\'s coins. Claim it on the result screen.';
     }
     return [
       EndingCard(
@@ -445,11 +461,14 @@ class _RoundScreenState extends State<RoundScreen> {
         'Launches with your check-ins',
         withDays,
       ),
-      const EndingCard(
+      EndingCard(
         RoundEnding.noDays,
         'Launches and you have 0 days',
-        'Nothing comes back. Your deposit stays in the prize and the token '
-            'pool.',
+        // None of the deposits goes to the shop when a sponsor fills it.
+        round.liquidityBps == 0
+            ? 'Nothing comes back. Your deposit stays in the prize.'
+            : 'Nothing comes back. Your deposit stays in the prize and the '
+                  'shop.',
       ),
       EndingCard(
         RoundEnding.refund,
@@ -491,10 +510,25 @@ class _RoundScreenState extends State<RoundScreen> {
     String busyLabel(String doing) =>
         s.funding ? 'Preparing your wallet…' : doing;
 
+    final season = round.season;
     switch (_next) {
       case RoundNext.join:
+        // A Season squad past its last day to join, or full: the app stops
+        // offering Join (the contract still takes one).
+        if (season != null && season.joinClosed(s.now, round.memberCount)) {
+          return [
+            hint(joinStopNote),
+            PillButton(
+              key: const Key('round-join-closed'),
+              kind: PillKind.glass,
+              icon: Icons.lock_outline_rounded,
+              label: season.joinClosedLabel(s.now),
+              onPressed: null,
+            ),
+          ];
+        }
         return [
-          hint('Pay once. It comes back if the token never launches.'),
+          hint('Pay once. Back with Refund if not launched in time.'),
           PillButton(
             kind: PillKind.volt,
             icon: Icons.bolt_rounded,
@@ -505,7 +539,7 @@ class _RoundScreenState extends State<RoundScreen> {
               round,
               onJoined: () => showMessage(
                 context,
-                'You\'re in. Check in today to start your share.',
+                joinedNote(round, s.now),
                 kind: BannerKind.success,
               ),
             ),
@@ -514,7 +548,11 @@ class _RoundScreenState extends State<RoundScreen> {
       case RoundNext.checkIn:
         return [
           hint(
-            s.hasPendingCheckIn
+            season != null && season.notStarted(s.now)
+                ? season.opensHint(s.now)
+                : season != null && season.checkInsOver(s.now)
+                ? season.endedHint
+                : s.hasPendingCheckIn
                 ? 'Today\'s check-in is signed. Finish it on chain.'
                 : s.health.available
                 ? 'Reads today\'s steps from your phone.'
@@ -546,7 +584,7 @@ class _RoundScreenState extends State<RoundScreen> {
         ];
       case RoundNext.launch:
         return [
-          hint('The bar is full. Anyone can launch the token now.'),
+          hint('The bar is full. Anyone can launch the coin now.'),
           PillButton(
             kind: PillKind.volt,
             icon: Icons.rocket_launch_rounded,
@@ -556,7 +594,7 @@ class _RoundScreenState extends State<RoundScreen> {
             busyLabel: busyLabel('Launching on Flap…'),
             onPressed: () => _run(
               () => s.launch(launcher: _id),
-              'Launched. The token is live.',
+              'Launched. The coin is live.',
             ),
           ),
           if (s.isMember && !s.checkedInToday && !_busy)
@@ -578,7 +616,7 @@ class _RoundScreenState extends State<RoundScreen> {
         ];
       case RoundNext.claim:
         return [
-          hint('Your share is waiting in the vault.'),
+          hint('Your share is waiting in the piggy bank.'),
           PillButton(
             kind: PillKind.volt,
             icon: Icons.auto_awesome_rounded,
@@ -595,7 +633,8 @@ class _RoundScreenState extends State<RoundScreen> {
         return [
           hint(
             s.daysOf > 0
-                ? 'Nothing more to claim yet. More arrives as people trade.'
+                ? 'Nothing more to claim yet. Tax arrives for 30 days, only '
+                      'when people trade.'
                 : 'You had no check-ins when it launched.',
           ),
           PillButton(
@@ -608,7 +647,7 @@ class _RoundScreenState extends State<RoundScreen> {
       case RoundNext.refund:
         final back = s.refundable > BigInt.zero ? s.refundable : s.deposit;
         return [
-          hint('The bar did not fill in time. Your deposit is yours again.'),
+          hint('Not launched in time. Press Refund for your deposit.'),
           PillButton(
             icon: Icons.undo_rounded,
             label: 'Refund · ${formatTestUsd(back)}',
@@ -637,16 +676,51 @@ class _RoundScreenState extends State<RoundScreen> {
 
 /// The round's name, its state, the bar and its deadline in local time:
 /// "Closes Mon 30 Nov, 07:34 · 3 days left".
+///
+/// A Season squad has one more line under the bar while it is open: before
+/// the start "Season 1 starts Tue 1 Dec · everyone at 0", during "Day 7 of
+/// 30 · average 4.2 days · you 5", and, once even every day left could not
+/// fill the bar, "This squad can't fill now. 100% back after 31 Dec." A
+/// round that puts none of the deposits in the shop (a sponsor fills it)
+/// says "Your deposit never touches the coin"; no other round does.
 class _Header extends StatelessWidget {
   const _Header({required this.state, required this.round});
   final AppState state;
   final Round round;
+
+  /// The Season line under the bar, and whether it is the warning.
+  (String, bool)? _seasonLine() {
+    final s = state;
+    final season = round.season;
+    if (season == null || s.launched || s.pastDeadline) return null;
+    final now = s.now;
+    if (season.cannotFill(
+      now,
+      totalCheckIns: s.totalCheckIns,
+      memberCount: round.memberCount,
+      goal: round.checkInGoal,
+    )) {
+      return (season.cannotFillLine(round.deadline), true);
+    }
+    if (season.notStarted(now)) return (season.barBefore, false);
+    if (season.checkInsOver(now)) return null;
+    return (
+      season.barDuring(
+        now,
+        totalCheckIns: s.totalCheckIns,
+        memberCount: round.memberCount,
+        yourDays: s.isMember && s.yourDaysKnown ? s.daysOf : null,
+      ),
+      false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = context.type;
     final c = context.colors;
     final s = state;
+    final seasonLine = _seasonLine();
     final (text, colour) = s.launched
         ? ('Launched', c.success)
         : s.pastDeadline
@@ -707,10 +781,36 @@ class _Header extends StatelessWidget {
           '${round.memberCount == 1 ? '1 member' : '${formatCount(round.memberCount)} members'}',
           style: t.body(13).copyWith(color: c.text2),
         ),
+        if (seasonLine != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            seasonLine.$1,
+            key: const Key('round-season'),
+            style: t
+                .body(13, FontWeight.w600)
+                .copyWith(color: seasonLine.$2 ? c.text : c.volt),
+          ),
+        ],
+        if (round.liquidityBps == 0) ...[
+          const SizedBox(height: Space.s2),
+          Row(
+            key: const Key('round-deposit-safe'),
+            children: [
+              Icon(Icons.shield_outlined, size: 16, color: c.volt),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  'Your deposit never touches the coin',
+                  style: t.body(13, FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ],
         if (!s.launched && !s.pastDeadline && s.poolShort > BigInt.zero) ...[
           const SizedBox(height: 4),
           Text(
-            'The token pool is ${formatTestUsd(s.poolShort)} short of the '
+            'The shop money is ${formatTestUsd(s.poolShort)} short of the '
             '${formatCount(AppConfig.launchPoolFloor)} $testUsd Flap needs.',
             style: t.body(13).copyWith(color: c.text2),
           ),

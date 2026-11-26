@@ -38,7 +38,36 @@ class NewRoundScreen extends StatefulWidget {
   static const depositOptions = [100, 500, 1000, 2000];
   static const goalOptions = [3, 6, 12, 30, 60];
   static const dayOptions = [1, 3, 7, 14, 30];
-  static const poolOptions = [1000, 3000, 5000, 10000];
+
+  /// The shop's share of each deposit. 0: none, a sponsor fills the shop
+  /// and every deposit is prize (a sponsored round, as a Season squad is).
+  /// 30% stays the default.
+  static const poolOptions = [0, 1000, 3000, 5000, 10000];
+
+  /// The chip for a shop share: "30%", or for 0 who fills the shop instead.
+  static String poolLabel(int bps) =>
+      bps == 0 ? '0% · a sponsor fills the shop' : formatBps(bps);
+
+  /// The honest line under the shop share, from what the contracts do with
+  /// it. With 0% the shop is sponsor money only (`poolQuoteNow` is the
+  /// sponsors' total), so the round cannot launch without one, and every
+  /// deposit goes to the prize. With a share, that part of each deposit is
+  /// locked in the shop at launch; the prize is the rest, so a member whose
+  /// days are at least the average (all days / all members) gets at least
+  /// that rest of the deposit back, in either ending.
+  static String poolLine(int bps) {
+    if (bps <= 0) {
+      return 'Needs a sponsor\'s shop money to launch. Every deposit is '
+          'prize.';
+    }
+    if (bps >= 10000) {
+      return 'The whole deposit becomes locked shop money at launch. No '
+          'prize: only coins and tax.';
+    }
+    return '${formatBps(bps)} of each deposit becomes locked shop money at '
+        'launch. Keep up with the average and you get at least '
+        '${formatBps(10000 - bps)} back, plus coins and tax.';
+  }
 
   /// How many members fill Flap's pool floor with no sponsor, when each
   /// pays [deposit] whole test USD and [bps] of it goes to the token pool.
@@ -54,13 +83,15 @@ class NewRoundScreen extends StatefulWidget {
   ///     rest is the prize, shared by days checked in. When the whole
   ///     deposit goes to the pool there is no prize, and the one line says
   ///     both;
-  ///   - whatever the split, half the token supply and 80% of the trading
-  ///     tax go to the round's vault and are shared by days checked in
-  ///     ("most of": the deal has no percentages);
+  ///   - whatever the split, the launch makes 1,000,000 coins: half seed
+  ///     the shop (the pool, whose LP is burned), half go to the round's
+  ///     vault (the "piggy bank"), shared by days checked in;
+  ///   - the tax: 3% on buys, 5% on sells for 30 days, 80% to the vault and
+  ///     20% burned;
   ///   - `launch()` needs [goal] check-ins, and Flap's Portal will not open
   ///     a pool under its floor ([AppConfig.launchPoolFloor]): both, said
   ///     on one line, then who may launch (anyone);
-  ///   - after the deadline with no launch, every deposit can be taken back.
+  ///   - after the deadline with no launch, each member presses Refund.
   /// Amounts are test USD.
   static List<String> dealLines({
     required int deposit,
@@ -76,24 +107,33 @@ class NewRoundScreen extends StatefulWidget {
       if (toPrize > 0) ...[
         'Prize: ${formatCount(toPrize)} $usd of each deposit, shared by '
             'days shown up.',
-        'Token pool: ${formatCount(toPool)} $usd of each deposit.',
+        if (bps > 0)
+          'Shop: ${formatCount(toPool)} $usd of each deposit (the coin\'s '
+              'trading pool).'
+        else
+          'Shop: a sponsor fills it (the coin\'s trading pool). No deposit '
+              'goes in.',
       ] else
-        'Prize: none. The whole deposit goes to the token pool.',
-      'Token: half the supply and most of the trading tax, shared by days '
-          'shown up.',
+        'Prize: none. The whole deposit goes into the shop.',
+      'Coins: 1,000,000 made at launch. Half go into the shop, half into '
+          'the group\'s piggy bank, split by days.',
+      'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+          '20% burned.',
       'Launch needs both: ${formatCount(goal)} check-ins and '
-          '${formatCount(AppConfig.launchPoolFloor)} $usd in the token pool.',
+          '${formatCount(AppConfig.launchPoolFloor)} $usd of shop money.',
       'Who launches: anyone, once both are there.',
-      'No launch in ${days(daysOpen)}: every deposit goes back.',
+      'No launch in ${days(daysOpen)}: each member presses Refund and gets '
+          'their deposit back.',
     ];
   }
 
   /// The quiet line under the deal: who fills Flap's pool floor.
   static String floorLine({required int deposit, required int bps}) {
+    if (bps <= 0) return 'Flap sets that floor. Here only a sponsor fills it.';
     final n = membersForFloor(deposit: deposit, bps: bps);
     final people = n == 1 ? '1 person' : '${formatCount(n)} people';
-    return 'Flap sets that pool floor. At this deposit it takes $people, or '
-        'a sponsor.';
+    return 'Flap sets that floor. At this deposit it takes $people, or a '
+        'sponsor.';
   }
 
   /// The fewest people the hint under the goal counts on.
@@ -452,7 +492,7 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
                     const _FieldLabel(
                       label: 'Name',
                       helper:
-                          'Also the name of the token. It can\'t be changed '
+                          'Also the name of the coin. It can\'t be changed '
                           'after you start.',
                     ),
                     const SizedBox(height: Space.s3),
@@ -509,7 +549,7 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
                 context,
                 label: 'Goal',
                 helper:
-                    'Check-ins the group needs to launch the token. One per '
+                    'Check-ins the group needs to launch the coin. One per '
                     'person per day.',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -543,8 +583,8 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
                 context,
                 label: 'Runs for',
                 helper:
-                    'If the goal isn\'t reached by then, every deposit goes '
-                    'back.',
+                    'Not launched by then? Each member presses Refund and '
+                    'gets their deposit back.',
                 child: ChipPicker<int>(
                   key: const Key('round-days'),
                   options: NewRoundScreen.dayOptions,
@@ -563,10 +603,10 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
                   key: const Key('round-more'),
                   title: 'More options',
                   detail:
-                      'Token pool ${formatBps(_bps)} · '
+                      'Shop ${formatBps(_bps)} · '
                       '${_unlisted ? 'Unlisted' : 'Listed'}',
                   semanticLabel:
-                      'More options. Token pool ${formatBps(_bps)}, '
+                      'More options. Shop ${formatBps(_bps)}, '
                       '${_unlisted ? 'unlisted' : 'listed'}',
                   expanded: _more,
                   trailingIcon: _more
@@ -580,21 +620,34 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
                 const SizedBox(height: Space.s5),
                 _field(
                   context,
-                  label: 'Token pool',
+                  label: 'Shop money',
                   helper:
-                      'The part of each deposit that backs the token at '
-                      'launch. The rest is the prize.',
-                  child: ChipPicker<int>(
-                    key: const Key('round-pool'),
-                    options: NewRoundScreen.poolOptions,
-                    selection: _bps,
-                    label: formatBps,
-                    semanticLabel: (v) =>
-                        '${formatBps(v)} of each deposit to the token pool',
-                    height: Sizes.touch,
-                    minWidth: 56,
-                    wrap: true,
-                    onChanged: (v) => setState(() => _bps = v),
+                      'The part of each deposit that goes into the coin\'s '
+                      'shop at launch. The rest is the prize.',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ChipPicker<int>(
+                        key: const Key('round-pool'),
+                        options: NewRoundScreen.poolOptions,
+                        selection: _bps,
+                        label: NewRoundScreen.poolLabel,
+                        semanticLabel: (v) => v == 0
+                            ? '0% of each deposit into the shop, a sponsor '
+                                  'fills it'
+                            : '${formatBps(v)} of each deposit into the shop',
+                        height: Sizes.touch,
+                        minWidth: 56,
+                        wrap: true,
+                        onChanged: (v) => setState(() => _bps = v),
+                      ),
+                      const SizedBox(height: Space.s2),
+                      Text(
+                        NewRoundScreen.poolLine(_bps),
+                        key: const Key('round-pool-line'),
+                        style: t.body(13).copyWith(color: c.text2),
+                      ),
+                    ],
                   ),
                 ),
                 GlassCard(

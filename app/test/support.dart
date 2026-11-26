@@ -326,12 +326,15 @@ Map<String, dynamic> roundJson({
   String poolQuoteNow = '900',
   bool launched = false,
   int? deadline,
+  String deposit = '1000',
+  int liquidityBps = 3000,
+  Map<String, dynamic>? season,
 }) => {
   'launcher': at,
   'name': name,
   'quoteToken': '0x190C989D5665a0e404B444b53CAE9AbCfb600157',
-  'deposit': '1000',
-  'liquidityBps': 3000,
+  'deposit': deposit,
+  'liquidityBps': liquidityBps,
   'checkInGoal': checkInGoal,
   'totalCheckIns': totalCheckIns,
   'memberCount': memberCount,
@@ -346,7 +349,46 @@ Map<String, dynamic> roundJson({
   'vault': launched ? vault : null,
   'minSteps': 1000,
   'flapUrl': launched ? 'https://flap.sh/bnb-testnet/$tokenAddress' : null,
+  'season': ?season,
 };
+
+/// Season 1 as the server sends it with each of its squads: check-ins from
+/// Tue 1 Dec (day 20788) to Wed 30 Dec 2026 (day 20817), Join in the app
+/// until Mon 7 Dec (day 20794), squads of 10.
+Map<String, dynamic> seasonJson({int squadSize = 10}) => {
+  'name': 'Season 1',
+  'start': '2026-12-01',
+  'end': '2026-12-30',
+  'joinUntil': '2026-12-07',
+  'startDay': 20788,
+  'endDay': 20817,
+  'joinUntilDay': 20794,
+  'day': 0,
+  'days': 30,
+  'squadSize': squadSize,
+};
+
+/// 31 Dec 2026 23:59:59 UTC: Season 1's deadline.
+const seasonDeadline = 1798761599;
+
+/// A Season 1 squad: 100 test USD each, none of it to the shop (a sponsor
+/// fills it with 1,500), goal 240 (10 people x 30 days x 0.8).
+Map<String, dynamic> seasonRoundJson({
+  int totalCheckIns = 0,
+  int memberCount = 3,
+  Map<String, dynamic>? season,
+}) => roundJson(
+  name: 'Season 1 Squad A',
+  checkInGoal: 240,
+  totalCheckIns: totalCheckIns,
+  memberCount: memberCount,
+  prizeNow: '${memberCount * 100}',
+  poolQuoteNow: '1500',
+  deadline: seasonDeadline,
+  deposit: '100',
+  liquidityBps: 0,
+  season: season ?? seasonJson(),
+);
 
 Map<String, dynamic> meJson({
   bool member = true,

@@ -385,7 +385,7 @@ class ChainService {
     const [],
     gas: GasLimit.launch,
     rejected:
-        'The launch was rejected. The token pool may be under the minimum '
+        'The launch was rejected. The shop money may be under the minimum '
         'Flap needs; a sponsor can add the rest.',
   );
 

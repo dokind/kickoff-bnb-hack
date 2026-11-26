@@ -65,6 +65,161 @@ String? _address(Object? value) {
 /// deadline with no launch.
 enum RoundPhase { open, launched, expired }
 
+/// A Season: one event with one set of dates ("Season 1"), made of squads.
+/// Each squad is its own round: one bar, one piggy bank, one coin. The
+/// server sends it as `season` with a round that is part of one, and null or
+/// nothing with any other round; a server from before Seasons sends nothing.
+///
+/// The contract has no start date. The server signs no check-in for a
+/// Season round before [startDay] or after [endDay] (a server rule, like the
+/// fewest steps), so everyone starts at 0 on the same day. The app stops
+/// offering Join after [joinUntilDay] or at [squadSize] members; a join sent
+/// to the contract directly still goes through.
+class Season {
+  const Season({
+    required this.name,
+    required this.startDay,
+    required this.endDay,
+    required this.joinUntilDay,
+    this.squadSize = 0,
+  });
+
+  /// "Season 1".
+  final String name;
+
+  /// The first and the last check-in day, numbered as the contract numbers
+  /// days: unix seconds / 86400 (UTC).
+  final int startDay;
+  final int endDay;
+
+  /// The last day the app offers Join.
+  final int joinUntilDay;
+
+  /// The app stops offering Join at this many members. 0: no limit.
+  final int squadSize;
+
+  /// How many check-in days the Season has: 30.
+  int get dayCount => endDay - startDay + 1;
+
+  /// When check-ins open: 00:00 UTC on [startDay] (07:00 in Bangkok).
+  DateTime get startsAt => utcDayStart(startDay);
+
+  /// The last check-in day, at 00:00 UTC.
+  DateTime get lastDay => utcDayStart(endDay);
+
+  /// The last day the app offers Join, at 00:00 UTC.
+  DateTime get joinUntil => utcDayStart(joinUntilDay);
+
+  /// The Season's day [now] falls on: 0 before the first check-in day, 1 to
+  /// [dayCount] during, [dayCount] + 1 after the last.
+  int dayNumber(DateTime now) {
+    final today = dayIndexOf(now);
+    if (today < startDay) return 0;
+    if (today > endDay) return dayCount + 1;
+    return today - startDay + 1;
+  }
+
+  /// Check-ins have not opened yet: the server signs none.
+  bool notStarted(DateTime now) => dayIndexOf(now) < startDay;
+
+  /// The last check-in day is over: the server signs none.
+  bool checkInsOver(DateTime now) => dayIndexOf(now) > endDay;
+
+  /// Check-in days still to come, today included: all of them before the
+  /// start, none after the end.
+  int daysLeft(DateTime now) {
+    final today = dayIndexOf(now);
+    if (today < startDay) return dayCount;
+    if (today > endDay) return 0;
+    return endDay - today + 1;
+  }
+
+  /// Whole UTC days until check-ins open; 0 once they have.
+  int daysToStart(DateTime now) {
+    final n = startDay - dayIndexOf(now);
+    return n > 0 ? n : 0;
+  }
+
+  /// The last day to join in the app is over.
+  bool joinWindowOver(DateTime now) => dayIndexOf(now) > joinUntilDay;
+
+  /// The squad has as many members as the app lets in.
+  bool squadFull(int memberCount) => squadSize > 0 && memberCount >= squadSize;
+
+  /// The app stops offering Join: the window is over or the squad is full.
+  bool joinClosed(DateTime now, int memberCount) =>
+      joinWindowOver(now) || squadFull(memberCount);
+
+  /// The bar can no longer fill in this Season: even if every member, and
+  /// while the app still lets people in a full squad, checked in on every
+  /// day left (today included), it would stay short of [goal]. The round is
+  /// then refunded after its deadline.
+  bool cannotFill(
+    DateTime now, {
+    required int totalCheckIns,
+    required int memberCount,
+    required int goal,
+  }) {
+    if (goal <= 0 || totalCheckIns >= goal) return false;
+    var people = memberCount;
+    if (!joinClosed(now, memberCount)) {
+      // Anyone may still come: nothing to say yet.
+      if (squadSize <= 0) return false;
+      if (squadSize > people) people = squadSize;
+    }
+    return totalCheckIns + people * daysLeft(now) < goal;
+  }
+
+  /// The `season` of a round's JSON. Null when there is none, or when it
+  /// makes no sense (no dates, the end before the start). The day numbers
+  /// are read first (unix seconds are taken as the day they fall on); the
+  /// "YYYY-MM-DD" dates stand in for them, or a full date and time, read as
+  /// its UTC day.
+  static Season? fromJson(Object? j) {
+    if (j is! Map) return null;
+    int? day(Object? index, Object? date) {
+      final n = index is num
+          ? index.toInt()
+          : index is String
+          ? int.tryParse(index.trim())
+          : null;
+      if (n != null && n > 0) return n > 100000000 ? n ~/ 86400 : n;
+      if (date is! String) return null;
+      final text = date.trim();
+      if (!text.contains('T')) return dayIndexOfKey(text);
+      final at = DateTime.tryParse(text);
+      return at == null ? null : dayIndexOf(at);
+    }
+
+    final start = day(j['startDay'], j['start']);
+    final end = day(j['endDay'], j['end']);
+    if (start == null || end == null || end < start) return null;
+    final until = day(j['joinUntilDay'], j['joinUntil']) ?? end;
+    final name = '${j['name'] ?? ''}'.trim();
+    final size = _int(j['squadSize']);
+    return Season(
+      name: name.isEmpty ? 'Season' : name,
+      startDay: start,
+      endDay: end,
+      joinUntilDay: until,
+      squadSize: size > 0 ? size : 0,
+    );
+  }
+
+  /// The server's shape, so a round kept on the device reads back the same.
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'start': utcDayKey(startsAt),
+    'end': utcDayKey(lastDay),
+    'joinUntil': utcDayKey(joinUntil),
+    'startDay': startDay,
+    'endDay': endDay,
+    'joinUntilDay': joinUntilDay,
+    'days': dayCount,
+    'squadSize': squadSize,
+  };
+}
+
 /// One round, as the server read it from the chain: an entry of GET /rounds,
 /// or the fuller answer of GET /rounds/:launcher and GET /round.
 class Round {
@@ -88,6 +243,7 @@ class Round {
     this.flapUrl,
     this.featured = false,
     this.unlisted = false,
+    this.season,
   });
 
   /// The round's contract (CheckInLauncher).
@@ -135,6 +291,10 @@ class Round {
   /// and join it, and the chain is public.
   final bool unlisted;
 
+  /// The Season this round is a squad of. Null for any other round, and
+  /// with a server that does not send it.
+  final Season? season;
+
   /// The launcher address in lower case: how the app tells rounds apart.
   String get id => launcher.toLowerCase();
 
@@ -164,6 +324,7 @@ class Round {
     flapUrl: flapUrl,
     featured: featured ?? this.featured,
     unlisted: unlisted ?? this.unlisted,
+    season: season,
   );
 
   /// The same shape the server sends, so a round can be kept on the device
@@ -188,6 +349,7 @@ class Round {
     'flapUrl': flapUrl,
     'featured': featured,
     'unlisted': unlisted,
+    'season': season?.toJson(),
   };
 
   /// The part of one deposit that goes to the token pool, and the rest.
@@ -217,6 +379,7 @@ class Round {
         : null,
     featured: j['featured'] == true,
     unlisted: j['unlisted'] == true,
+    season: Season.fromJson(j['season']),
   );
 }
 

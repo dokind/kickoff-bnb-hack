@@ -10,6 +10,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../util/pot.dart';
+import '../util/season_text.dart';
 import '../widgets/common.dart';
 import '../widgets/gauges.dart';
 import 'health_sheet.dart';
@@ -18,21 +19,34 @@ import 'health_sheet.dart';
 /// [then], once the day is on chain the sheet shows the new share for a
 /// moment ([CheckInSheet.linger]), closes itself and calls [then] (Home
 /// opens Your round); its button, [thenLabel], does the same at once.
+///
+/// A Season round before its first check-in day or after its last: the
+/// server signs no check-in then, so the sheet does not open, nothing is
+/// sent anywhere, and the banner says when check-ins open (or that they
+/// ended).
 Future<void> showCheckInSheet(
   BuildContext context,
   AppState state,
   Round round, {
   VoidCallback? then,
   String thenLabel = 'See your round',
-}) => showAppSheet<void>(
-  context,
-  builder: (_) => CheckInSheet(
-    state: state,
-    round: round,
-    then: then,
-    thenLabel: thenLabel,
-  ),
-);
+}) {
+  final season = (state.roundOf(round.id) ?? round).season;
+  final refusal = season?.checkInRefusal(state.now);
+  if (refusal != null) {
+    showMessage(context, refusal);
+    return Future<void>.value();
+  }
+  return showAppSheet<void>(
+    context,
+    builder: (_) => CheckInSheet(
+      state: state,
+      round: round,
+      then: then,
+      thenLabel: thenLabel,
+    ),
+  );
+}
 
 /// Today's check-in.
 ///

@@ -274,10 +274,10 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.text('and 50% of the members\' half of the token'),
+        find.text('and 50% of the piggy bank\'s 500,000 coins'),
         findsOneWidget,
       );
-      expect(find.textContaining('A projection:'), findsOneWidget);
+      expect(find.textContaining('A guess:'), findsOneWidget);
       expect(
         textOf(tester, 'round-hero-call'),
         'Check in today and your share goes to 60%.',
@@ -287,7 +287,7 @@ void main() {
       final ledger = find.byKey(const Key('round-ledger'));
       for (final (label, value) in [
         ('Deposit paid', '1,000 test USD'),
-        ('Goes to the token pool', '300 test USD'),
+        ('Goes into the shop', '300 test USD'),
         ('Goes to the prize', '700 test USD'),
         ('Your days shown up', '2 of 4 check-ins'),
         ('Your share now', '50%'),
@@ -303,7 +303,7 @@ void main() {
           reason: value,
         );
       }
-      expect(find.text('For good once it launches'), findsOneWidget);
+      expect(find.text('Locked in the shop at launch'), findsOneWidget);
 
       // How it ends: the launch with days applies now.
       expect(endingNowIn(RoundEnding.withDays), findsOneWidget);
@@ -393,11 +393,11 @@ void main() {
       await pumpRound(tester, state);
 
       expect(find.text('Launched'), findsOneWidget);
-      expect(find.text('Yours from the vault so far'), findsOneWidget);
+      expect(find.text('Yours from the piggy bank'), findsOneWidget);
       expect(find.text('822.32'), findsOneWidget);
       expect(find.text('Your share'), findsOneWidget);
       expect(endingNowIn(RoundEnding.withDays), findsOneWidget);
-      expect(find.text('In the token pool for good'), findsOneWidget);
+      expect(find.text('Locked in the shop forever'), findsOneWidget);
       // Check-ins are closed: no "today" line.
       expect(find.byKey(const Key('round-today')), findsNothing);
 
@@ -409,11 +409,21 @@ void main() {
       // Claimed: what the vault paid stays the hero; the next step is the
       // result.
       expect(find.text('822.32'), findsOneWidget);
+      // The tax reaches the piggy bank for 30 days, and only from trades.
       expect(
-        find.text('All claimed so far. Trading tax keeps adding to it.'),
+        find.text(
+          'All claimed so far. Tax arrives for 30 days after the launch, and '
+          'only when people trade.',
+        ),
         findsOneWidget,
       );
+      expect(find.textContaining('keeps'), findsNothing);
       expect(button('See the result'), findsOneWidget);
+      expect(
+        textOf(tester, 'round-hint'),
+        'Nothing more to claim yet. Tax arrives for 30 days, only when '
+        'people trade.',
+      );
     });
 
     testWidgets('launched with 0 days: nothing comes back', (tester) async {
@@ -494,7 +504,7 @@ void main() {
       expect(chain.calls, ['launch']);
       // The steps moved only as the state did them.
       expect(seen, ['Launch on Flap', 'Read the result']);
-      expect(bannerNote.value!.text, 'Launched. The token is live.');
+      expect(bannerNote.value!.text, 'Launched. The coin is live.');
     });
 
     testWidgets('not a member: one button to join', (tester) async {
@@ -503,6 +513,175 @@ void main() {
       expect(find.text('Join to earn a share'), findsOneWidget);
       expect(find.byKey(const Key('round-ledger')), findsNothing);
       expect(button('Join · 1,000 test USD'), findsOneWidget);
+      // 30% of each deposit goes into the shop here: no such promise, and
+      // no Season line.
+      expect(find.byKey(const Key('round-deposit-safe')), findsNothing);
+      expect(find.text('Your deposit never touches the coin'), findsNothing);
+      expect(find.byKey(const Key('round-season')), findsNothing);
+    });
+  });
+
+  group('a Season squad', () {
+    testWidgets('before the start: "everyone at 0", and the check-in waits', (
+      tester,
+    ) async {
+      final server = FakeServer()..round = seasonRoundJson();
+      final chain = FakeChain(isMember: true, deposit: 100, pool: 1500);
+      final state = await makeState(server: server, chain: chain);
+      await pumpRound(tester, state);
+
+      expect(
+        textOf(tester, 'round-season'),
+        'Season 1 starts Tue 1 Dec · everyone at 0',
+      );
+      // The sponsor's 1,500 meets Flap's floor: no "short" line.
+      expect(find.textContaining('short of the'), findsNothing);
+      // Under the bar line.
+      expect(
+        tester.getRect(find.byKey(const Key('round-season'))).top,
+        greaterThan(
+          tester
+              .getRect(
+                find.text(
+                  '0 of 240 check-ins fill the bar · 3 '
+                  'members',
+                ),
+              )
+              .bottom,
+        ),
+      );
+      // A sponsor fills the shop: the deposit never touches the coin.
+      expect(find.byKey(const Key('round-deposit-safe')), findsOneWidget);
+      expect(find.text('Your deposit never touches the coin'), findsOneWidget);
+      // Nothing to check in yet: the hint says when, no call to check in.
+      expect(textOf(tester, 'round-hint'), 'Check-ins open 1 Dec · in 6 days');
+      expect(find.byKey(const Key('round-hero-call')), findsNothing);
+      // No part of the deposit goes into the shop, and the screen says so.
+      expect(find.text('None: a sponsor fills the shop'), findsOneWidget);
+      expect(
+        find.text('Nothing comes back. Your deposit stays in the prize.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('prize and the shop'), findsNothing);
+
+      // Pressed anyway: the banner says when, the sheet does not open, and
+      // nothing is sent.
+      server.requests.clear();
+      await tester.tap(find.byKey(const Key('round-checkin')));
+      await settle(tester);
+      expect(
+        bannerNote.value!.text,
+        'Season 1 check-ins open Tue 1 Dec (07:00 in Bangkok). Everyone '
+        'starts at 0.',
+      );
+      expect(find.byType(CheckInSheet), findsNothing);
+      expect(server.requests.where((r) => r.startsWith('POST')), isEmpty);
+      expect(chain.calls, isEmpty);
+    });
+
+    testWidgets('during: the day, the average and your days', (tester) async {
+      final state = await makeState(
+        server: FakeServer()
+          ..round = seasonRoundJson(totalCheckIns: 42, memberCount: 10),
+        chain: FakeChain(isMember: true, deposit: 100, daysOf: 5),
+        now: DateTime.utc(2026, 12, 7, 9),
+      );
+      await pumpRound(tester, state);
+      expect(
+        textOf(tester, 'round-season'),
+        'Day 7 of 30 · average 4.2 days · you 5',
+      );
+      expect(button('Check in'), findsOneWidget);
+      expect(
+        textOf(tester, 'round-hint'),
+        'Self-reported in the browser. Testnet only.',
+      );
+    });
+
+    testWidgets('a visitor sees the day and the average, not "you"', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: FakeServer()
+          ..round = seasonRoundJson(totalCheckIns: 12, memberCount: 4),
+        chain: FakeChain(deposit: 100, pool: 1500),
+        now: DateTime.utc(2026, 12, 4, 9),
+      );
+      await pumpRound(tester, state);
+      expect(textOf(tester, 'round-season'), 'Day 4 of 30 · average 3 days');
+      expect(button('Join · 100 test USD'), findsOneWidget);
+    });
+
+    testWidgets('a squad that can no longer fill says so', (tester) async {
+      // 8 Dec: joining has closed with 3 members. Even every day left (23)
+      // from each of them is 21 + 69 = 90 of 240.
+      final state = await makeState(
+        server: FakeServer()
+          ..round = seasonRoundJson(totalCheckIns: 21, memberCount: 3),
+        chain: FakeChain(isMember: true, deposit: 100, daysOf: 7),
+        now: DateTime.utc(2026, 12, 8, 9),
+      );
+      await pumpRound(tester, state);
+      expect(
+        textOf(tester, 'round-season'),
+        'This squad can\'t fill now. 100% back after 31 Dec.',
+      );
+    });
+
+    testWidgets('after 30 Dec: a short hint, the server\'s words on a press', (
+      tester,
+    ) async {
+      // 31 Dec: 230 of 240 and no check-in day left, so no launch: 100%
+      // back after the deadline.
+      final server = FakeServer()
+        ..round = seasonRoundJson(totalCheckIns: 230, memberCount: 10);
+      final chain = FakeChain(
+        isMember: true,
+        deposit: 100,
+        daysOf: 25,
+        totalCheckIns: 230,
+      );
+      final state = await makeState(
+        server: server,
+        chain: chain,
+        now: DateTime.utc(2026, 12, 31, 3),
+      );
+      await pumpRound(tester, state);
+      expect(
+        textOf(tester, 'round-season'),
+        'This squad can\'t fill now. 100% back after 31 Dec.',
+      );
+      expect(textOf(tester, 'round-hint'), 'Check-ins ended 30 Dec');
+
+      server.requests.clear();
+      await tester.tap(find.byKey(const Key('round-checkin')));
+      await settle(tester);
+      expect(
+        bannerNote.value!.text,
+        'Season 1 check-ins have ended. The last day was Wed 30 Dec.',
+      );
+      expect(find.byType(CheckInSheet), findsNothing);
+      expect(server.requests.where((r) => r.startsWith('POST')), isEmpty);
+      expect(chain.calls, isEmpty);
+    });
+
+    testWidgets('a full squad: no Join, and why', (tester) async {
+      final state = await makeState(
+        server: FakeServer()..round = seasonRoundJson(memberCount: 10),
+        chain: FakeChain(deposit: 100, pool: 1500),
+      );
+      await pumpRound(tester, state);
+      final closed = tester.widget<PillButton>(
+        find.byKey(const Key('round-join-closed')),
+      );
+      expect(closed.label, 'Squad full');
+      expect(closed.onPressed, isNull);
+      expect(
+        textOf(tester, 'round-hint'),
+        'The contract still takes joins; the app stops here so everyone '
+        'starts fair.',
+      );
+      expect(button('Join · 100 test USD'), findsNothing);
     });
   });
 

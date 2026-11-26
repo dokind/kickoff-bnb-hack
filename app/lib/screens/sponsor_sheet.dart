@@ -76,8 +76,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
       if (!mounted) return;
       showMessage(
         context,
-        '${formatMoney(amount, AppConfig.quoteSymbol)} added to the token '
-        'pool.',
+        '${formatTestUsd(amount)} added to the shop money.',
         kind: BannerKind.success,
       );
       Navigator.of(context).pop();
@@ -94,7 +93,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
     builder: (context, _) {
       final t = context.type;
       final c = context.colors;
-      const usd = AppConfig.quoteSymbol;
+      const usd = testUsd;
       return PopScope(
         canPop: !_busy,
         child: SheetFrame(
@@ -109,13 +108,13 @@ class _SponsorSheetState extends State<SponsorSheet> {
               const SizedBox(height: Space.s1),
               Semantics(
                 header: true,
-                child: Text('Sponsor the token pool', style: t.title(30)),
+                child: Text('Sponsor the shop', style: t.title(30)),
               ),
               const SizedBox(height: Space.s2),
               Text(
-                'Sponsor money goes only to the token pool. It earns no '
-                'share, and it comes back to you if the token does not '
-                'launch.',
+                'Sponsor money goes only into the shop (the coin\'s trading '
+                'pool). It earns no share. No launch by the deadline? Press '
+                'Refund and it all comes back.',
                 style: t.body(15).copyWith(color: c.text2),
               ),
               const SizedBox(height: Space.s4),
@@ -125,7 +124,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
                 child: Column(
                   children: [
                     KeyValueRow(
-                      'In the pool now',
+                      'Shop money now',
                       formatMoney(
                         _state.roundOf(widget.round.id) == null
                             ? widget.round.poolQuoteNow
@@ -165,7 +164,7 @@ class _SponsorSheetState extends State<SponsorSheet> {
               ],
               PillButton(
                 kind: PillKind.volt,
-                label: _error != null ? 'Try again' : 'Add to the token pool',
+                label: _error != null ? 'Try again' : 'Add to the shop',
                 busy: _busy,
                 busyLabel: _state.funding
                     ? 'Preparing your wallet…'

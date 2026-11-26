@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pacepact/app_state.dart';
+import 'package:pacepact/config.dart';
 import 'package:pacepact/router.dart';
 import 'package:pacepact/screens/account_screen.dart';
 import 'package:pacepact/screens/add_round_sheet.dart';
@@ -194,7 +195,7 @@ void main() {
       expect(find.text('1,000 test USD'), findsOneWidget);
       expect(find.text('To the prize'), findsOneWidget);
       expect(find.text('700 test USD · 70%'), findsOneWidget);
-      expect(find.text('To the token pool'), findsOneWidget);
+      expect(find.text('Into the shop'), findsOneWidget);
       expect(find.text('300 test USD · 30%'), findsOneWidget);
       expect(find.text('If it launches'), findsOneWidget);
       expect(find.text('Last day to launch'), findsOneWidget);
@@ -339,7 +340,7 @@ void main() {
       expect(find.text('YOU\'RE IN.'), findsOneWidget);
     });
 
-    testWidgets('what can be lost: three plain lines over the pay button', (
+    testWidgets('the two endings and what can be lost, over the pay button', (
       tester,
     ) async {
       final state = await makeState(chain: FakeChain(dollars: 2500));
@@ -348,12 +349,15 @@ void main() {
       const lines = [
         // CheckInLauncher.refund(): the whole deposit after a missed
         // deadline.
-        'Round never launches: your 1,000 test USD comes back.',
+        'No launch by the deadline: press Refund and your 1,000 test USD '
+            'comes back.',
+        // The other ending: StreakVault pays by days.
+        'It launches: you\'re paid by your days, not by your deposit.',
         // StreakVault: shares by days; no day, no share.
         'It launches and you have no check-ins: nothing comes back.',
         // launch(): liquidityBps of the deposits seeds the pool; Flap burns
         // the LP.
-        'It launches: 30% of your deposit becomes the token pool for good.',
+        'It launches: 30% of your deposit goes into the shop, locked forever.',
       ];
       final pay = tester.getRect(button('Pay deposit · 1,000 test USD'));
       var above = 0.0;
@@ -366,13 +370,17 @@ void main() {
         above = rect.top;
       }
       // Plain, in the sheet's quiet text, not an error.
-      final style = tester.widget<Text>(find.text(lines[1])).style!;
+      final style = tester.widget<Text>(find.text(lines[2])).style!;
       expect(style.color, AppColors.dark.text2);
       expect(style.fontSize, greaterThanOrEqualTo(12));
       expect(find.byKey(const Key('join-late')), findsNothing);
+      // 30% of each deposit goes into the shop: no deposit-back promise.
+      expect(find.byKey(const Key('join-keep-up')), findsNothing);
+      expect(find.textContaining('the average'), findsNothing);
+      expect(find.text('300 test USD · 30%'), findsOneWidget);
     });
 
-    testWidgets('no token pool share: the third line is left out', (
+    testWidgets('no shop share: the Keep-Up lines, and no shop line', (
       tester,
     ) async {
       final server = FakeServer()..round!['liquidityBps'] = 0;
@@ -381,15 +389,28 @@ void main() {
         chain: FakeChain(dollars: 2500),
       );
       await pumpBody(tester, JoinSheet(state: state, round: state.round!));
-      expect(
-        find.text('Round never launches: your 1,000 test USD comes back.'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('It launches and you have no check-ins: nothing comes back.'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('becomes the token pool'), findsNothing);
+      const lines = [
+        'No launch by the deadline: press Refund and your 1,000 test USD '
+            'comes back.',
+        'It launches: you\'re paid by your days, not by your deposit.',
+        // The prize is every deposit, so days at or above the average get
+        // at least the deposit back (StreakVault: prize x days / all days).
+        'It launches and your days are at least the average: your whole '
+            'deposit back, or more.',
+        'Fewer days than the average: you get back less.',
+        'It launches and you have no check-ins: nothing comes back.',
+      ];
+      var above = 0.0;
+      for (final line in lines) {
+        expect(find.text(line), findsOneWidget, reason: line);
+        final top = tester.getRect(find.text(line)).top;
+        expect(top, greaterThan(above), reason: line);
+        above = top;
+      }
+      expect(find.byKey(const Key('join-keep-up')), findsOneWidget);
+      expect(find.textContaining('goes into the shop'), findsNothing);
+      expect(find.text('None · a sponsor fills it'), findsOneWidget);
+      expect(find.text('1,000 test USD · 100%'), findsOneWidget);
     });
 
     testWidgets('one check-in from full: a warning, and "Join anyway"', (
@@ -495,10 +516,25 @@ void main() {
       expect(find.byKey(const Key('join-late')), findsOneWidget);
       expect(find.text('The bar is full: 6 of 6 check-ins.'), findsOneWidget);
 
-      // Two to go (the default round): one press pays, as before.
+      // Three to go with three members: one check-in each fills the bar
+      // today, so the round can launch before this wallet's first day.
+      final today = await makeState(
+        server: FakeServer()..round = roundJson(totalCheckIns: 3),
+        chain: FakeChain(dollars: 2500),
+      );
+      await tester.pumpWidget(const SizedBox());
+      await pumpBody(tester, JoinSheet(state: today, round: today.round!));
+      expect(find.byKey(const Key('join-late')), findsOneWidget);
+      expect(
+        find.text('3 of 6 check-ins. The bar can fill today.'),
+        findsOneWidget,
+      );
+
+      // Four to go with three members (the default round): it cannot fill
+      // today, and one press pays, as before.
       final chain = FakeChain(dollars: 2500);
       final open = await makeState(
-        server: FakeServer()..round = roundJson(totalCheckIns: 4),
+        server: FakeServer()..round = roundJson(totalCheckIns: 2),
         chain: chain,
       );
       await tester.pumpWidget(const SizedBox());
@@ -576,6 +612,245 @@ void main() {
       await settle(tester, 14);
       expect(find.byType(JoinSheet), findsNothing);
       expect(find.byType(CheckInSheet), findsNothing);
+    });
+  });
+
+  group('a Season squad: the join sheet', () {
+    const closedNote =
+        'The contract still takes joins; the app stops here so everyone '
+        'starts fair.';
+
+    testWidgets('before the start: when it starts, and nothing to check in', (
+      tester,
+    ) async {
+      final chain = FakeChain(dollars: 2500, deposit: 100, pool: 1500);
+      final state = await makeState(
+        server: FakeServer()..round = seasonRoundJson(),
+        chain: chain,
+      );
+      await pumpBody(tester, JoinSheet(state: state, round: state.round!));
+
+      expect(
+        find.text('Season 1 · Starts Tue 1 Dec. Everyone starts at 0.'),
+        findsOneWidget,
+      );
+      // Under the title.
+      expect(
+        tester.getRect(find.byKey(const Key('join-season'))).top,
+        greaterThan(tester.getRect(find.text('Pay the deposit')).bottom),
+      );
+      expect(find.text('None · a sponsor fills it'), findsOneWidget);
+      expect(find.byKey(const Key('join-keep-up')), findsOneWidget);
+      expect(
+        find.text(
+          'No launch by the deadline: press Refund and your 100 test USD '
+          'comes back.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('join-closed-note')), findsNothing);
+      expect(find.byKey(const Key('join-late')), findsNothing);
+
+      await tester.tap(button('Pay deposit · 100 test USD'));
+      await settle(tester);
+      expect(chain.calls, ['join 100']);
+      expect(find.text('YOU\'RE IN.'), findsOneWidget);
+      // No check-in before the start: no "Check in now", and the sheet says
+      // when.
+      expect(
+        tester.widget<Text>(find.byKey(const Key('join-done-text'))).data,
+        '100 test USD is in the round\'s contract. Season 1 check-ins open '
+        'Tue 1 Dec (07:00 in Bangkok). Everyone starts at 0.',
+      );
+      expect(button('Check in now'), findsNothing);
+      expect(button('Let\'s go'), findsOneWidget);
+    });
+
+    testWidgets('late in the window: the day, and the days left', (
+      tester,
+    ) async {
+      final chain = FakeChain(dollars: 2500, deposit: 100, pool: 1500);
+      final state = await makeState(
+        server: FakeServer()
+          ..round = seasonRoundJson(totalCheckIns: 16, memberCount: 4),
+        chain: chain,
+        now: DateTime.utc(2026, 12, 5, 9),
+      );
+      await pumpBody(tester, JoinSheet(state: state, round: state.round!));
+      expect(find.text('Season 1 · Day 5 of 30: 26 days left'), findsOneWidget);
+      await tester.tap(button('Pay deposit · 100 test USD'));
+      await settle(tester);
+      expect(chain.calls, ['join 100']);
+      // Started: today's check-in is the way on.
+      expect(button('Check in now'), findsOneWidget);
+    });
+
+    testWidgets('after 7 Dec the app stops offering Join', (tester) async {
+      final chain = FakeChain(dollars: 2500, deposit: 100, pool: 1500);
+      final state = await makeState(
+        server: FakeServer()
+          ..round = seasonRoundJson(totalCheckIns: 21, memberCount: 3),
+        chain: chain,
+        now: DateTime.utc(2026, 12, 8, 9),
+      );
+      await pumpBody(tester, JoinSheet(state: state, round: state.round!));
+
+      final closed = tester.widget<PillButton>(
+        find.byKey(const Key('join-closed')),
+      );
+      expect(closed.label, 'Joining closed 7 Dec');
+      expect(closed.onPressed, isNull);
+      expect(find.text(closedNote), findsOneWidget);
+      // Over the button.
+      expect(
+        tester.getRect(find.text(closedNote)).bottom,
+        lessThanOrEqualTo(
+          tester.getRect(find.byKey(const Key('join-closed'))).top,
+        ),
+      );
+      expect(button('Pay deposit · 100 test USD'), findsNothing);
+      await tester.tap(find.byKey(const Key('join-closed')));
+      await settle(tester);
+      expect(chain.calls, isEmpty, reason: 'nothing is paid');
+    });
+
+    testWidgets('at 10 members the squad is full', (tester) async {
+      final chain = FakeChain(dollars: 2500, deposit: 100, pool: 1500);
+      final state = await makeState(
+        server: FakeServer()..round = seasonRoundJson(memberCount: 10),
+        chain: chain,
+      );
+      await pumpBody(tester, JoinSheet(state: state, round: state.round!));
+      final closed = tester.widget<PillButton>(
+        find.byKey(const Key('join-closed')),
+      );
+      expect(closed.label, 'Squad full');
+      expect(closed.onPressed, isNull);
+      expect(find.text(closedNote), findsOneWidget);
+      // The Season line still says when it starts.
+      expect(
+        find.text('Season 1 · Starts Tue 1 Dec. Everyone starts at 0.'),
+        findsOneWidget,
+      );
+      // Nine of ten: Join is offered.
+      await tester.pumpWidget(const SizedBox());
+      final nine = await makeState(
+        server: FakeServer()..round = seasonRoundJson(memberCount: 9),
+        chain: FakeChain(dollars: 2500, deposit: 100, pool: 1500),
+      );
+      await pumpBody(tester, JoinSheet(state: nine, round: nine.round!));
+      expect(find.byKey(const Key('join-closed')), findsNothing);
+      expect(button('Pay deposit · 100 test USD'), findsOneWidget);
+    });
+
+    testWidgets('a small phone with large text: the closed sheet fits', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: FakeServer()..round = seasonRoundJson(memberCount: 10),
+        chain: FakeChain(dollars: 2500, deposit: 100, pool: 1500),
+      );
+      usePhone(tester, size: const Size(320, 568));
+      tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(
+        inApp(JoinSheet(state: state, round: state.round!)),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      final pill = tester.getRect(find.byKey(const Key('join-closed')));
+      expect(pill.bottom, lessThanOrEqualTo(568));
+      // The note leads the part over the button that scrolls by itself.
+      final window = tester.getRect(
+        find
+            .ancestor(
+              of: find.byKey(const Key('join-outcomes')),
+              matching: find.byType(SingleChildScrollView),
+            )
+            .first,
+      );
+      expect(window.bottom, lessThanOrEqualTo(pill.top));
+      expect(
+        tester.getRect(find.byKey(const Key('join-closed-note'))).top,
+        greaterThanOrEqualTo(window.top),
+      );
+    });
+  });
+
+  group('a Season squad: the check-in guard', () {
+    /// A page with one button that opens the check-in sheet for the round.
+    Future<void> pumpOpener(WidgetTester tester, AppState state) async {
+      usePhone(tester);
+      await tester.pumpWidget(
+        inApp(
+          Builder(
+            builder: (context) => Center(
+              child: TextButton(
+                onPressed: () => showCheckInSheet(context, state, state.round!),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('before 1 Dec: no sheet, the reason, and no call at all', (
+      tester,
+    ) async {
+      final server = FakeServer()..round = seasonRoundJson();
+      final chain = FakeChain(isMember: true, deposit: 100, pool: 1500);
+      final state = await makeState(server: server, chain: chain);
+      await pumpOpener(tester, state);
+      server.requests.clear();
+
+      await tester.tap(find.text('open'));
+      await settle(tester, 14);
+      expect(find.byType(CheckInSheet), findsNothing);
+      expect(
+        bannerNote.value!.text,
+        'Season 1 check-ins open Tue 1 Dec (07:00 in Bangkok). Everyone '
+        'starts at 0.',
+      );
+      expect(server.requests, isEmpty);
+      expect(chain.calls, isEmpty);
+    });
+
+    testWidgets('after 30 Dec: "check-ins ended", and no call', (tester) async {
+      final server = FakeServer()
+        ..round = seasonRoundJson(totalCheckIns: 230, memberCount: 10);
+      final chain = FakeChain(isMember: true, deposit: 100, daysOf: 25);
+      final state = await makeState(
+        server: server,
+        chain: chain,
+        now: DateTime.utc(2026, 12, 31, 3),
+      );
+      await pumpOpener(tester, state);
+      server.requests.clear();
+      await tester.tap(find.text('open'));
+      await settle(tester, 14);
+      expect(find.byType(CheckInSheet), findsNothing);
+      expect(
+        bannerNote.value!.text,
+        'Season 1 check-ins have ended. The last day was Wed 30 Dec.',
+      );
+      expect(server.requests, isEmpty);
+      expect(chain.calls, isEmpty);
+    });
+
+    testWidgets('from 1 Dec, 00:00 UTC the sheet opens as for any round', (
+      tester,
+    ) async {
+      final state = await makeState(
+        server: FakeServer()..round = seasonRoundJson(),
+        chain: FakeChain(isMember: true, deposit: 100, pool: 1500),
+        now: DateTime.utc(2026, 12, 1),
+      );
+      await pumpOpener(tester, state);
+      await tester.tap(find.text('open'));
+      await settle(tester, 14);
+      expect(find.byType(CheckInSheet), findsOneWidget);
+      expect(bannerNote.value, isNull);
     });
   });
 
@@ -789,11 +1064,12 @@ void main() {
       expect(find.text('RUN THE\nSTAKES.'), findsOneWidget);
       expect(find.byType(PillButton), findsOneWidget);
       expect(find.textContaining('wallet'), findsNothing);
-      // The sub-line is a concrete example, not a summary.
+      // The sub-line: what any round asks, with no number that a round
+      // reached by a link could contradict.
       expect(
         find.text(
-          'Put in 500. Show up each day. Split the prize with everyone who '
-          'did.',
+          'Put in a test deposit. Show up each day. Split the prize with '
+          'everyone who did.',
         ),
         findsOneWidget,
       );
@@ -945,9 +1221,18 @@ void main() {
       );
       await pumpApp(tester, state, location: '/r/$launcherB');
 
-      // No wallet yet: the first-run steps come first.
+      // No wallet yet: the first-run steps come first, and they name the
+      // round the link was for and its deposit.
       expect(find.byType(OnboardingScreen), findsOneWidget);
       expect(state.selected, isNull);
+      await settle(tester);
+      expect(
+        find.text(
+          'You\'re invited to Lumpini Striders. Put in 1,000 test USD, show '
+          'up each day, and split the prize with everyone who did.',
+        ),
+        findsOneWidget,
+      );
       // In a browser there is no permission to ask for: "Get started" is
       // the only step.
       await press(tester, 'Get started');
@@ -999,7 +1284,7 @@ void main() {
       await tester.tap(button('Claim · Morning Movers'));
       await settle(tester, 12);
       expect(find.byType(ResultScreen), findsOneWidget);
-      expect(find.text('THE TOKEN\nIS LIVE.'), findsOneWidget);
+      expect(find.text('THE COIN\nIS LIVE.'), findsOneWidget);
       // Back leads Home again.
       await tester.tap(find.byTooltip('Back'));
       await settle(tester, 12);
@@ -1050,7 +1335,18 @@ void main() {
         tester.widget<DotMatrixText>(find.byType(DotMatrixText)).text,
         '1,068.59',
       );
-      expect(find.text('tokens'), findsOneWidget);
+      expect(find.text('coins'), findsOneWidget);
+      // The tax reaches the piggy bank for the coin's first 30 days only.
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('result-tax')),
+        200,
+        scrollable: list,
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const Key('result-tax'))).data,
+        'Tax arrives for 30 days after the launch, and only when people '
+        'trade. Claim again whenever there is more.',
+      );
 
       await tester.tap(button('Claim'));
       await settle(tester);
@@ -1058,7 +1354,7 @@ void main() {
       expect(button('Nothing more to claim yet'), findsOneWidget);
       expect(enabled(tester, 'Nothing more to claim yet'), isFalse);
       await tester.scrollUntilVisible(
-        find.textContaining('250,000 tokens · 1,068.59 USD'),
+        find.textContaining('250,000 coins · 1,068.59 test USD'),
         200,
         scrollable: list,
       );
@@ -1527,6 +1823,14 @@ void main() {
         find.textContaining('Check-ins are attested, not proven:'),
         findsOneWidget,
       );
+      // Running is the first club, not the only one.
+      expect(
+        find.text(
+          'Running is the first club. It works for any group where showing '
+          'up can be stamped.',
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('scrolled to the end, the list ends above the tab bar', (
@@ -1792,18 +2096,20 @@ void main() {
         [
           'Join: 1,000 test USD each, paid once.',
           'Prize: 700 test USD of each deposit, shared by days shown up.',
-          'Token pool: 300 test USD of each deposit.',
-          'Token: half the supply and most of the trading tax, shared by '
-              'days shown up.',
-          'Launch needs both: 6 check-ins and 1,500 test USD in the '
-              'token pool.',
+          'Shop: 300 test USD of each deposit (the coin\'s trading pool).',
+          'Coins: 1,000,000 made at launch. Half go into the shop, half '
+              'into the group\'s piggy bank, split by days.',
+          'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+              '20% burned.',
+          'Launch needs both: 6 check-ins and 1,500 test USD of shop money.',
           'Who launches: anyone, once both are there.',
-          'No launch in 7 days: every deposit goes back.',
+          'No launch in 7 days: each member presses Refund and gets their '
+              'deposit back.',
         ],
       );
       expect(
         NewRoundScreen.floorLine(deposit: 1000, bps: 3000),
-        'Flap sets that pool floor. At this deposit it takes 5 people, or a '
+        'Flap sets that floor. At this deposit it takes 5 people, or a '
         'sponsor.',
       );
       expect(
@@ -1816,22 +2122,25 @@ void main() {
         [
           'Join: 2,000 test USD each, paid once.',
           'Prize: 1,000 test USD of each deposit, shared by days shown up.',
-          'Token pool: 1,000 test USD of each deposit.',
-          'Token: half the supply and most of the trading tax, shared by '
-              'days shown up.',
-          'Launch needs both: 30 check-ins and 1,500 test USD in the '
-              'token pool.',
+          'Shop: 1,000 test USD of each deposit (the coin\'s trading pool).',
+          'Coins: 1,000,000 made at launch. Half go into the shop, half '
+              'into the group\'s piggy bank, split by days.',
+          'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+              '20% burned.',
+          'Launch needs both: 30 check-ins and 1,500 test USD of shop '
+              'money.',
           'Who launches: anyone, once both are there.',
-          'No launch in 1 day: every deposit goes back.',
+          'No launch in 1 day: each member presses Refund and gets their '
+              'deposit back.',
         ],
       );
       expect(
         NewRoundScreen.floorLine(deposit: 2000, bps: 5000),
-        'Flap sets that pool floor. At this deposit it takes 2 people, or a '
+        'Flap sets that floor. At this deposit it takes 2 people, or a '
         'sponsor.',
       );
       // The whole deposit in the pool: one line says there is no prize and
-      // where the deposit goes, instead of "0 USD ... shared" and a
+      // where the deposit goes, instead of "0 test USD ... shared" and a
       // "Token pool" line that repeats the deposit.
       expect(
         NewRoundScreen.dealLines(
@@ -1842,23 +2151,26 @@ void main() {
         ),
         [
           'Join: 2,000 test USD each, paid once.',
-          'Prize: none. The whole deposit goes to the token pool.',
-          'Token: half the supply and most of the trading tax, shared by '
-              'days shown up.',
-          'Launch needs both: 3 check-ins and 1,500 test USD in the '
-              'token pool.',
+          'Prize: none. The whole deposit goes into the shop.',
+          'Coins: 1,000,000 made at launch. Half go into the shop, half '
+              'into the group\'s piggy bank, split by days.',
+          'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+              '20% burned.',
+          'Launch needs both: 3 check-ins and 1,500 test USD of shop money.',
           'Who launches: anyone, once both are there.',
-          'No launch in 30 days: every deposit goes back.',
+          'No launch in 30 days: each member presses Refund and gets their '
+              'deposit back.',
         ],
       );
       expect(
         NewRoundScreen.floorLine(deposit: 2000, bps: 10000),
-        'Flap sets that pool floor. At this deposit it takes 1 person, or a '
+        'Flap sets that floor. At this deposit it takes 1 person, or a '
         'sponsor.',
       );
       expect(NewRoundScreen.membersForFloor(deposit: 100, bps: 1000), 150);
-      // No percentages in the deal, and the token share is said at every
-      // split: it does not depend on the split.
+      // No percentages in the deal's money lines (the tax line is fixed by
+      // the coin, not a choice, and says its own), and the coins and the
+      // tax are said at every split: they do not depend on the split.
       for (final bps in NewRoundScreen.poolOptions) {
         final lines = NewRoundScreen.dealLines(
           deposit: 500,
@@ -1866,13 +2178,19 @@ void main() {
           goal: 6,
           daysOpen: 7,
         );
-        for (final line in lines) {
+        for (final line in lines.where((l) => !l.startsWith('Tax: '))) {
           expect(line.contains('%'), isFalse, reason: line);
         }
-        expect(lines.where((l) => l.startsWith('Token: ')), [
-          'Token: half the supply and most of the trading tax, shared by '
-              'days shown up.',
-        ], reason: '$bps');
+        expect(
+          lines.where((l) => l.startsWith('Coins: ') || l.startsWith('Tax: ')),
+          [
+            'Coins: 1,000,000 made at launch. Half go into the shop, half '
+                'into the group\'s piggy bank, split by days.',
+            'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+                '20% burned.',
+          ],
+          reason: '$bps',
+        );
       }
     });
 
@@ -1942,7 +2260,7 @@ void main() {
           lines,
           contains(
             'Launch needs both: ${formatCount(goal)} check-ins and 1,500 '
-            'test USD in the token pool.',
+            'test USD of shop money.',
           ),
         );
         // Every amount in the deal is test money.
@@ -1950,6 +2268,105 @@ void main() {
           expect(line, isNot(matches(RegExp(r'\d USD'))), reason: line);
         }
       }
+    });
+
+    test('0% to the shop: a sponsor fills it, every deposit is prize', () {
+      expect(NewRoundScreen.poolOptions.first, 0);
+      expect(
+        AppConfig.defaultLiquidityBps,
+        3000,
+        reason: '30% stays the default',
+      );
+      expect(NewRoundScreen.poolLabel(0), '0% · a sponsor fills the shop');
+      expect(NewRoundScreen.poolLabel(3000), '30%');
+      expect(
+        NewRoundScreen.poolLine(0),
+        'Needs a sponsor\'s shop money to launch. Every deposit is prize.',
+      );
+      // The default's honest line: 30% is locked in the shop at launch; the
+      // prize is the other 70%, so the average member gets at least 70%.
+      expect(
+        NewRoundScreen.poolLine(3000),
+        '30% of each deposit becomes locked shop money at launch. Keep up '
+        'with the average and you get at least 70% back, plus coins and tax.',
+      );
+      expect(
+        NewRoundScreen.poolLine(1000),
+        '10% of each deposit becomes locked shop money at launch. Keep up '
+        'with the average and you get at least 90% back, plus coins and tax.',
+      );
+      expect(
+        NewRoundScreen.poolLine(10000),
+        'The whole deposit becomes locked shop money at launch. No prize: '
+        'only coins and tax.',
+      );
+      expect(
+        NewRoundScreen.dealLines(deposit: 100, bps: 0, goal: 30, daysOpen: 30),
+        [
+          'Join: 100 test USD each, paid once.',
+          'Prize: 100 test USD of each deposit, shared by days shown up.',
+          'Shop: a sponsor fills it (the coin\'s trading pool). No deposit '
+              'goes in.',
+          'Coins: 1,000,000 made at launch. Half go into the shop, half '
+              'into the group\'s piggy bank, split by days.',
+          'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+              '20% burned.',
+          'Launch needs both: 30 check-ins and 1,500 test USD of shop money.',
+          'Who launches: anyone, once both are there.',
+          'No launch in 30 days: each member presses Refund and gets their '
+              'deposit back.',
+        ],
+      );
+      expect(
+        NewRoundScreen.floorLine(deposit: 100, bps: 0),
+        'Flap sets that floor. Here only a sponsor fills it.',
+      );
+    });
+
+    testWidgets('the 0% choice: its line, the deal, and the round it starts', (
+      tester,
+    ) async {
+      final chain = FakeChain();
+      final state = await makeState(chain: chain);
+      await pumpNewRound(tester, state);
+      await tester.enterText(find.byKey(const Key('round-name')), 'Squad A');
+      await tester.pump();
+      await tester.ensureVisible(find.text('More options'));
+      await tester.pump();
+      await tester.tap(find.text('More options'));
+      await settle(tester);
+      // The default first: 30%, with its honest line.
+      expect(
+        tester.widget<Text>(find.byKey(const Key('round-pool-line'))).data,
+        startsWith('30% of each deposit becomes locked shop money'),
+      );
+      await pick(tester, 'round-pool', '0% · a sponsor fills the shop');
+      expect(
+        tester.widget<Text>(find.byKey(const Key('round-pool-line'))).data,
+        'Needs a sponsor\'s shop money to launch. Every deposit is prize.',
+      );
+      expect(find.text('Shop 0% · Listed'), findsOneWidget);
+      expect(
+        find.text(
+          'Shop: a sponsor fills it (the coin\'s trading pool). No deposit '
+          'goes in.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Flap sets that floor. Here only a sponsor fills it.'),
+        findsOneWidget,
+      );
+      // The chip fits a 360pt phone's row on its own line, whole.
+      final chip = find.descendant(
+        of: find.byKey(const Key('round-pool')),
+        matching: find.byType(AppChip),
+      );
+      expect(tester.getSize(chip.first).height, greaterThanOrEqualTo(44));
+
+      await press(tester, 'Start round');
+      await settle(tester, 12);
+      expect(chain.calls, ['createRound Squad A SA 1000 0 6']);
     });
 
     testWidgets('one job: the name, three choices, the deal, one button', (
@@ -1967,7 +2384,7 @@ void main() {
       expect(find.text('NAME'), findsOneWidget);
       expect(
         find.text(
-          'Also the name of the token. It can\'t be changed after you start.',
+          'Also the name of the coin. It can\'t be changed after you start.',
         ),
         findsOneWidget,
       );
@@ -1978,15 +2395,16 @@ void main() {
       expect(find.text('GOAL'), findsOneWidget);
       expect(
         find.text(
-          'Check-ins the group needs to launch the token. One per person '
-          'per day.',
+          'Check-ins the group needs to launch the coin. One per person per '
+          'day.',
         ),
         findsOneWidget,
       );
       expect(find.text('RUNS FOR'), findsOneWidget);
       expect(
         find.text(
-          'If the goal isn\'t reached by then, every deposit goes back.',
+          'Not launched by then? Each member presses Refund and gets their '
+          'deposit back.',
         ),
         findsOneWidget,
       );
@@ -2016,7 +2434,7 @@ void main() {
 
       // "More options" is closed, says so, and says what is inside.
       expect(find.text('More options'), findsOneWidget);
-      expect(find.text('Token pool 30% · Listed'), findsOneWidget);
+      expect(find.text('Shop 30% · Listed'), findsOneWidget);
       expect(find.text('TOKEN POOL'), findsNothing);
       expect(find.byKey(const Key('round-unlisted')), findsNothing);
       expect(
@@ -2033,14 +2451,16 @@ void main() {
       for (final line in [
         'Join: 1,000 test USD each, paid once.',
         'Prize: 700 test USD of each deposit, shared by days shown up.',
-        'Token pool: 300 test USD of each deposit.',
-        'Token: half the supply and most of the trading tax, shared by days '
-            'shown up.',
-        'Launch needs both: 6 check-ins and 1,500 test USD in the '
-            'token pool.',
+        'Shop: 300 test USD of each deposit (the coin\'s trading pool).',
+        'Coins: 1,000,000 made at launch. Half go into the shop, half '
+            'into the group\'s piggy bank, split by days.',
+        'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+            '20% burned.',
+        'Launch needs both: 6 check-ins and 1,500 test USD of shop money.',
         'Who launches: anyone, once both are there.',
-        'No launch in 7 days: every deposit goes back.',
-        'Flap sets that pool floor. At this deposit it takes 5 people, or a '
+        'No launch in 7 days: each member presses Refund and gets their '
+            'deposit back.',
+        'Flap sets that floor. At this deposit it takes 5 people, or a '
             'sponsor.',
       ]) {
         expect(find.text(line), findsOneWidget, reason: line);
@@ -2074,14 +2494,14 @@ void main() {
       );
       expect(
         find.bySemanticsLabel(
-          'NAME\nAlso the name of the token. It can\'t be changed after you '
+          'NAME\nAlso the name of the coin. It can\'t be changed after you '
           'start.',
         ),
         findsOneWidget,
       );
       expect(
         find.bySemanticsLabel(
-          'GOAL\nCheck-ins the group needs to launch the token. One per '
+          'GOAL\nCheck-ins the group needs to launch the coin. One per '
           'person per day.',
         ),
         findsOneWidget,
@@ -2097,8 +2517,8 @@ void main() {
       await settle(tester);
       expect(
         find.text(
-          'Launch needs both: 12 check-ins and 1,500 test USD in the token '
-          'pool.',
+          'Launch needs both: 12 check-ins and 1,500 test USD of shop '
+          'money.',
         ),
         findsOneWidget,
       );
@@ -2163,14 +2583,17 @@ void main() {
       for (final line in [
         'Join: 500 test USD each, paid once.',
         'Prize: 350 test USD of each deposit, shared by days shown up.',
-        'Token pool: 150 test USD of each deposit.',
-        'Token: half the supply and most of the trading tax, shared by days '
-            'shown up.',
-        'Launch needs both: 12 check-ins and 1,500 test USD in the '
-            'token pool.',
+        'Shop: 150 test USD of each deposit (the coin\'s trading pool).',
+        'Coins: 1,000,000 made at launch. Half go into the shop, half '
+            'into the group\'s piggy bank, split by days.',
+        'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+            '20% burned.',
+        'Launch needs both: 12 check-ins and 1,500 test USD of shop '
+            'money.',
         'Who launches: anyone, once both are there.',
-        'No launch in 3 days: every deposit goes back.',
-        'Flap sets that pool floor. At this deposit it takes 10 people, or a '
+        'No launch in 3 days: each member presses Refund and gets their '
+            'deposit back.',
+        'Flap sets that floor. At this deposit it takes 10 people, or a '
             'sponsor.',
       ]) {
         expect(find.text(line), findsOneWidget, reason: line);
@@ -2191,11 +2614,11 @@ void main() {
         tester.getSemantics(find.bySemanticsLabel(RegExp('^More options'))),
         isSemantics(hasExpandedState: true, isExpanded: true),
       );
-      expect(find.text('TOKEN POOL'), findsOneWidget);
+      expect(find.text('SHOP MONEY'), findsOneWidget);
       expect(
         find.text(
-          'The part of each deposit that backs the token at launch. The '
-          'rest is the prize.',
+          'The part of each deposit that goes into the coin\'s shop at '
+          'launch. The rest is the prize.',
         ),
         findsOneWidget,
       );
@@ -2208,7 +2631,19 @@ void main() {
               ),
             )
             .map((c) => (c.text, c.selected)),
-        [('10%', false), ('30%', true), ('50%', false), ('100%', false)],
+        [
+          ('0% · a sponsor fills the shop', false),
+          ('10%', false),
+          ('30%', true),
+          ('50%', false),
+          ('100%', false),
+        ],
+      );
+      // The default's honest line, under the chips.
+      expect(
+        tester.widget<Text>(find.byKey(const Key('round-pool-line'))).data,
+        '30% of each deposit becomes locked shop money at launch. Keep up '
+        'with the average and you get at least 70% back, plus coins and tax.',
       );
       // The existing switch, with its existing words.
       final toggle = find.byKey(const Key('round-unlisted'));
@@ -2223,6 +2658,8 @@ void main() {
 
       // For a screen reader the switch is one thing: its name, what it
       // means, whether it is on, and a press of its own.
+      await tester.ensureVisible(toggle);
+      await tester.pump();
       final unlisted = find.bySemanticsLabel('Unlisted. $unlistedNoteText');
       expect(
         tester.getSemantics(unlisted),
@@ -2238,36 +2675,37 @@ void main() {
       );
       await settle(tester);
       expect(tester.getSemantics(unlisted), isSemantics(isToggled: true));
-      expect(find.text('Token pool 30% · Unlisted'), findsOneWidget);
+      expect(find.text('Shop 30% · Unlisted'), findsOneWidget);
       tester.semantics.tap(
         find.semantics.byLabel('Unlisted. $unlistedNoteText'),
       );
       await settle(tester);
       expect(
         tester.getSemantics(
-          find.bySemanticsLabel('30% of each deposit to the token pool'),
+          find.bySemanticsLabel('30% of each deposit into the shop'),
         ),
         isSemantics(isButton: true, isSelected: true, hasTapAction: true),
       );
 
       await pick(tester, 'round-pool', '100%');
-      expect(find.text('Token pool 100% · Listed'), findsOneWidget);
+      expect(find.text('Shop 100% · Listed'), findsOneWidget);
       expect(
-        find.text('Prize: none. The whole deposit goes to the token pool.'),
+        find.text('Prize: none. The whole deposit goes into the shop.'),
         findsOneWidget,
       );
-      expect(find.textContaining('Token pool: '), findsNothing);
-      // The token share is the same line as at every other split.
+      expect(find.textContaining('Shop: '), findsNothing);
+      // The coins and the tax are the same lines as at every other split.
+      for (final line in [
+        'Coins: 1,000,000 made at launch. Half go into the shop, half into '
+            'the group\'s piggy bank, split by days.',
+        'Tax: 3% on buys, 5% on sells for 30 days. 80% to the piggy bank, '
+            '20% burned.',
+      ]) {
+        expect(find.text(line), findsOneWidget, reason: line);
+      }
       expect(
         find.text(
-          'Token: half the supply and most of the trading tax, shared by '
-          'days shown up.',
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.text(
-          'Flap sets that pool floor. At this deposit it takes 3 people, or a '
+          'Flap sets that floor. At this deposit it takes 3 people, or a '
           'sponsor.',
         ),
         findsOneWidget,
@@ -2374,14 +2812,14 @@ void main() {
       await tabTo(tester, 'More options');
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await settle(tester);
-      await tabTo(tester, '50% of each deposit to the token pool');
+      await tabTo(tester, '50% of each deposit into the shop');
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await settle(tester);
-      expect(find.text('Token pool 50% · Listed'), findsOneWidget);
+      expect(find.text('Shop 50% · Listed'), findsOneWidget);
       await tabTo(tester, 'Unlisted. $unlistedNoteText');
       await tester.sendKeyEvent(LogicalKeyboardKey.space);
       await settle(tester);
-      expect(find.text('Token pool 50% · Unlisted'), findsOneWidget);
+      expect(find.text('Shop 50% · Unlisted'), findsOneWidget);
 
       // Typing in the name field and Enter does not start anything: the
       // name is for good, so the round starts from its button only.
@@ -2617,7 +3055,7 @@ void main() {
       await settle(tester);
       await press(tester, 'Start round');
       await settle(tester, 12);
-      // The defaults: 1,000 USD, 30% to the pool, 6 check-ins.
+      // The defaults: 1,000 test USD, 30% to the pool, 6 check-ins.
       expect(chain.calls, ['createRound Lumpini Striders LS 1000 3000 6']);
       // The creator is not made a member: joining is the same step as for
       // everyone else.
@@ -2723,7 +3161,7 @@ void main() {
       await tester.tap(toggle);
       await settle(tester);
       expect(tester.widget<CapsuleToggle>(toggle).value, isTrue);
-      expect(find.text('Token pool 30% · Unlisted'), findsOneWidget);
+      expect(find.text('Shop 30% · Unlisted'), findsOneWidget);
 
       await tester.enterText(find.byKey(const Key('round-name')), 'Night Owls');
       await settle(tester);

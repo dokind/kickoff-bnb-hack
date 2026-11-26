@@ -471,8 +471,8 @@ void main() {
       expect(find.text('test USD'), findsOneWidget);
       expect(
         find.text(
-          '1 of 3 check-ins is yours: 33.3% of the prize and of the token '
-          'share.',
+          '1 of 3 check-ins is yours: 33.3% of the prize and of the '
+          'piggy bank\'s coins.',
         ),
         findsOneWidget,
       );
@@ -501,8 +501,8 @@ void main() {
       expect(find.text('You'), findsOneWidget);
       expect(find.text('2 days'), findsOneWidget);
       expect(find.text('1 day'), findsOneWidget);
-      expect(find.text('1,400 USD'), findsOneWidget);
-      expect(find.text('700 USD'), findsOneWidget);
+      expect(find.text('1,400 test USD'), findsOneWidget);
+      expect(find.text('700 test USD'), findsOneWidget);
       // Only "You" is drawn in the accent.
       final bars = tester.widgetList<ShareTicks>(find.byType(ShareTicks));
       expect(bars.map((b) => b.accent), [false, true]);
@@ -575,15 +575,15 @@ void main() {
       // What zero days means when the token launches, in plain words.
       expect(
         find.textContaining(
-          '0 days means no share. If the token launches, that deposit stays '
-          'in the prize and the token pool; it comes back only if the round '
-          'never launches.',
+          '0 days = nothing. If the coin launches, that deposit stays in the '
+          'prize and the shop; it comes back (with Refund) only if there is '
+          'no launch by the deadline.',
         ),
         findsOneWidget,
       );
     });
 
-    testWidgets('you with zero days among others: 0 USD now, a real share '
+    testWidgets('you with zero days among others: 0 test USD now, a real share '
         'after one check-in', (tester) async {
       final state = await makeState(
         chain: FakeChain(isMember: true, totalCheckIns: 5),
@@ -599,8 +599,8 @@ void main() {
       );
       expect(
         find.text(
-          '0 of 5 check-ins are yours: 0% of the prize and of the token '
-          'share.',
+          '0 of 5 check-ins are yours: 0% of the prize and of the '
+          'piggy bank\'s coins.',
         ),
         findsOneWidget,
       );
@@ -635,8 +635,8 @@ void main() {
       // A visitor sees no share of their own, so no line about it.
       expect(find.byKey(const Key('pot-bar-needs')), findsNothing);
       expect(rowsOf(tester), [other, third]);
-      expect(find.text('1,575 USD'), findsOneWidget);
-      expect(find.text('525 USD'), findsOneWidget);
+      expect(find.text('1,575 test USD'), findsOneWidget);
+      expect(find.text('525 test USD'), findsOneWidget);
     });
 
     testWidgets('not joined and no check-ins: the true sentence, nothing '
@@ -671,8 +671,8 @@ void main() {
       );
       expect(
         find.text(
-          '2 of 2 check-ins are yours: 100% of the prize and of the token '
-          'share.',
+          '2 of 2 check-ins are yours: 100% of the prize and of the '
+          'piggy bank\'s coins.',
         ),
         findsOneWidget,
       );
@@ -686,7 +686,7 @@ void main() {
       expect(rowsOf(tester), [testAddress]);
       expect(tester.widget<ShareTicks>(find.byType(ShareTicks)).fraction, 1);
       expect(find.byKey(const Key('pot-everyone')), findsNothing);
-      expect(find.textContaining('0 days means'), findsNothing);
+      expect(find.textContaining('0 days = nothing'), findsNothing);
     });
 
     testWidgets('fifty members: the list stays short, "You" is always on '
@@ -760,20 +760,20 @@ void main() {
       await pumpPot(tester, state);
 
       expect(
-        find.text('The token launched. These shares are final.'),
+        find.text('The coin launched. These shares are final.'),
         findsOneWidget,
       );
       expect(find.textContaining('If it launched now'), findsNothing);
       expect(find.byKey(const Key('pot-amount')), findsNothing);
       expect(find.byKey(const Key('pot-nudge')), findsNothing);
       // The vault's own split of everything it has received, rounded down.
-      expect(find.text('822.32 USD'), findsOneWidget);
-      expect(find.text('411.16 USD'), findsOneWidget);
+      expect(find.text('822.32 test USD'), findsOneWidget);
+      expect(find.text('411.16 test USD'), findsOneWidget);
       expect(find.text('nothing'), findsOneWidget);
       expect(
         find.textContaining(
-          'A member with 0 days has no share: that deposit went to the '
-          'prize and the token pool.',
+          'A member with 0 days gets nothing: that deposit went to the '
+          'prize and the shop.',
         ),
         findsOneWidget,
       );
@@ -795,8 +795,8 @@ void main() {
 
       expect(
         find.text(
-          'This round closed without a launch. Every deposit goes back in '
-          'full, so nothing is shared.',
+          'No launch by the deadline, so nothing is shared. Each member '
+          'presses Refund to get their whole deposit back.',
         ),
         findsOneWidget,
       );
@@ -908,7 +908,7 @@ void main() {
       // The list's own count of this wallet's days stands, not 0.
       expect(rowsOf(tester), [testAddress, other]);
       expect(find.text('2 days'), findsOneWidget);
-      expect(find.text('1,400 USD'), findsOneWidget);
+      expect(find.text('1,400 test USD'), findsOneWidget);
       expect(find.text('nothing yet'), findsNothing);
 
       gate.complete();
@@ -966,8 +966,8 @@ void main() {
       expect(find.text(friendlyName(testAddress)), findsNothing);
       expect(
         find.text(
-          '1 of 4 check-ins is yours: 25% of the prize and of the token '
-          'share.',
+          '1 of 4 check-ins is yours: 25% of the prize and of the '
+          'piggy bank\'s coins.',
         ),
         findsOneWidget,
       );
@@ -1123,7 +1123,7 @@ void main() {
 
       expect(
         find.bySemanticsLabel(
-          'You, 2 days, 16.6% of all check-ins, 350 USD if it launched now',
+          'You, 2 days, 16.6% of all check-ins, 350 test USD if it launched now',
         ),
         findsOneWidget,
       );
@@ -1147,6 +1147,15 @@ void main() {
         tester.getSize(find.byKey(const Key('pot-everyone'))).height,
         greaterThanOrEqualTo(44),
       );
+      // The invite chip is a button of its own: the section around it is
+      // not read as one big button.
+      final invite = find.bySemanticsLabel('Invite someone to Morning Movers');
+      expect(invite, findsOneWidget);
+      expect(
+        tester.getSemantics(invite),
+        isSemantics(isButton: true, hasTapAction: true),
+      );
+      expect(tester.getSemantics(invite).rect.height, lessThan(100));
       semantics.dispose();
     });
   });

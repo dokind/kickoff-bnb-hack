@@ -9,6 +9,7 @@ import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
+import '../util/season_text.dart';
 import '../widgets/common.dart';
 import '../widgets/dot_matrix.dart';
 import '../widgets/how_it_works.dart';
@@ -23,6 +24,7 @@ import 'checkin_sheet.dart';
 import 'invite_sheet.dart';
 import 'join_sheet.dart';
 import 'round_screen.dart';
+import 'share_sheet.dart';
 import 'sponsor_sheet.dart';
 
 /// Home, the one screen. At the top: the rounds, one card each, swiped
@@ -140,7 +142,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// After a paid deposit: a short "You're in" and Your round, its Check in
-  /// ready.
+  /// ready (or, before a Season starts, when it starts).
   VoidCallback? _joined(Round round) {
     final go = _toRound(round);
     return go == null
@@ -148,7 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
         : () {
             showMessage(
               context,
-              'You\'re in. Check in today to start your share.',
+              joinedNote(round, _state.now),
               kind: BannerKind.success,
             );
             go();
@@ -275,6 +277,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             round: round,
                             onInvite: () =>
                                 showInviteSheet(context, _state, round),
+                            onShareCard: () =>
+                                showShareSheet(context, _state, round),
                             onOpenYou: _toRound(round),
                           ),
                         ),
@@ -356,7 +360,6 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Widget> _action(BuildContext context, Round round) {
     final t = context.type;
     final c = context.colors;
-    const usd = AppConfig.quoteSymbol;
     final stage = _state.stage;
     final at = round.launcher;
     // A press that began on one round's button never lands on another's: a
@@ -380,16 +383,35 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
     );
 
+    final season = round.season;
+    final now = _state.now;
     switch (stage) {
       case HomeStage.loading || HomeStage.error || HomeStage.noRound:
         return const [];
       case HomeStage.join:
+        // A Season squad past its last day to join, or full: the app stops
+        // offering Join (the contract still takes one).
+        if (season != null && season.joinClosed(now, round.memberCount)) {
+          return [
+            hint(joinStopNote),
+            PillButton(
+              kind: PillKind.glass,
+              icon: Icons.lock_outline_rounded,
+              label: season.joinClosedLabel(now),
+              key: key,
+              onPressed: null,
+            ),
+          ];
+        }
         return [
-          hint('Pay once. It comes back if the token never launches.'),
+          hint('Pay once. Back with Refund if not launched in time.'),
           PillButton(
             kind: PillKind.volt,
             icon: Icons.bolt_rounded,
-            label: 'Join $name · ${formatMoney(_state.deposit, usd)}',
+            // Plain "USD" here: " test" would cut most long round names short
+            // on a phone. The join sheet behind it says test USD throughout.
+            label:
+                'Join $name · ${formatMoney(_state.deposit, AppConfig.quoteSymbol)}',
             shrink: name,
             key: key,
             onPressed: () =>
@@ -399,7 +421,11 @@ class _HomeScreenState extends State<HomeScreen> {
       case HomeStage.checkIn:
         return [
           hint(
-            _state.hasPendingCheckIn
+            season != null && season.notStarted(now)
+                ? season.opensHint(now)
+                : season != null && season.checkInsOver(now)
+                ? season.endedHint
+                : _state.hasPendingCheckIn
                 ? 'Today\'s check-in is signed. Finish it on chain.'
                 : _state.health.available
                 ? 'Reads today\'s steps from your phone.'
@@ -433,9 +459,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return [
           hint(
             short > BigInt.zero
-                ? 'The bar is full, but the token pool is '
+                ? 'The bar is full, but the shop money is '
                       '${formatTestUsd(short)} short of what Flap needs.'
-                : 'The bar is full. Anyone can launch the token now.',
+                : 'The bar is full. Anyone can launch the coin now.',
           ),
           PillButton(
             kind: PillKind.volt,
@@ -451,7 +477,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? null
                 : () => _run(
                     () => _state.launch(launcher: at),
-                    'Launched. The token is live.',
+                    'Launched. The coin is live.',
                   ),
           ),
           if (short > BigInt.zero) ...[
@@ -459,7 +485,7 @@ class _HomeScreenState extends State<HomeScreen> {
             PillButton(
               kind: PillKind.glass,
               height: Sizes.buttonSmall,
-              label: 'Sponsor the token pool',
+              label: 'Sponsor the shop',
               onPressed: () => showSponsorSheet(context, _state, round),
             ),
           ] else if (canCheckInFirst && !_busy)
@@ -472,8 +498,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return [
           hint(
             _state.hasClaimable
-                ? 'The token launched. Your share is waiting in the vault.'
-                : 'The token launched. More arrives as people trade.',
+                ? 'The coin launched. Your share is in the piggy bank.'
+                : 'The coin launched. Tax arrives for 30 days, only when '
+                      'people trade.',
           ),
           PillButton(
             kind: PillKind.volt,
@@ -486,7 +513,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ];
       case HomeStage.result:
         return [
-          hint('The token launched. You have no check-ins in this round.'),
+          hint(
+            'The coin launched. No check-ins from you, so nothing to claim.',
+          ),
           PillButton(
             label: 'See the result · $name',
             shrink: name,
@@ -496,7 +525,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ];
       case HomeStage.refund:
         return [
-          hint('The bar did not fill in time. Your deposit is yours again.'),
+          hint('Not launched in time. Take your whole deposit back.'),
           PillButton(
             icon: Icons.undo_rounded,
             label: 'Deposit back · $name',
@@ -598,8 +627,9 @@ class _Header extends StatelessWidget {
           const SizedBox(width: Space.s3),
           if (state.hasWallet)
             Semantics(
+              container: true,
               button: true,
-              label: 'Wallet. ${formatMoney(state.usd, AppConfig.quoteSymbol)}',
+              label: 'Wallet. ${formatTestUsd(state.usd)}',
               excludeSemantics: true,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -612,7 +642,7 @@ class _Header extends StatelessWidget {
                       children: [
                         const SizedBox(width: 14),
                         Text(
-                          formatMoney(state.usd, AppConfig.quoteSymbol),
+                          formatTestUsd(state.usd),
                           style: t
                               .body(13, FontWeight.w600)
                               .copyWith(
@@ -680,7 +710,8 @@ class _NoRound extends StatelessWidget {
   }
 }
 
-/// The prize so far in dot-matrix numerals, beside the token pool.
+/// The prize so far in dot-matrix numerals, beside the shop money (the
+/// token's pool).
 class _PrizeCard extends StatelessWidget {
   const _PrizeCard({required this.state, required this.round});
   final AppState state;
@@ -727,7 +758,7 @@ class _PrizeCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const Overline('Token pool'),
+                const Overline('Shop money'),
                 const SizedBox(height: 6),
                 Text(
                   formatAmount(state.poolQuoteNow, maxFraction: 0),
@@ -738,7 +769,7 @@ class _PrizeCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   state.launched
-                      ? '$testUsd, in the pool'
+                      ? '$testUsd, locked in the shop'
                       : short > BigInt.zero
                       ? 'of ${formatCount(AppConfig.launchPoolFloor)} $testUsd '
                             'Flap needs'
