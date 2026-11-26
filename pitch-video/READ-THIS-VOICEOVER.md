@@ -10,7 +10,7 @@ Record anywhere quiet, phone 15–20 cm from your mouth. iPhone Voice Memos, Qui
 
 ---
 
-1. What if showing up every day paid you, and paid you more than the people who didn't?
+1. What if showing up every day earned you a share, and skipping cost you yours?
 
 2. Most fitness goals die in week two. Badges don't stop that, and betting apps make money when you fail.
 
@@ -22,15 +22,15 @@ Record anywhere quiet, phone 15–20 cm from your mouth. iPhone Voice Memos, Qui
 
 6. Your round shows what you'd get if it launched right now, and how every ending plays out. If the group falls short, your deposit comes back.
 
-7. When the bar is full, anyone can launch the round's token on Flap. The prize, half the supply, and the trading fees go to the people who showed up, split by days. This real testnet round paid eight hundred twenty-two, four hundred eleven, and nothing to the member who never walked.
+7. When the bar is full, anyone can launch the round's coin on Flap. The prize, half the new coins, and most of the trading tax go into the group's piggy bank, split by days. This testnet round split it two thirds, one third, and nothing for the member who never walked.
 
 8. Run it for a marathon. The race sponsors the pool, runners train for six weeks, and the ones who trained most earn most.
 
 9. Or a charity walk. A sponsor funds the pool, supporters walk every day, and members can give what they earn to the cause.
 
-10. Nobody holds the money. Not even us. It's all contracts on BNB Smart Chain, launched through Flap.
+10. We never hold the money. It's all contracts on BNB Smart Chain, launched through Flap.
 
-11. Cypher Run. Show up, and get paid by the people who also showed up.
+11. Cypher Run. Show up, and earn your share.
 
 ---
 
