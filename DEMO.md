@@ -53,8 +53,16 @@ Two more things a judge may try:
       pool: 30% of the deposits plus any sponsor money must reach 1,500 test USD before Launch
       works (five members at a 1,000 test USD deposit, or fewer and a sponsor through "Sponsor the
       token pool").
-- [ ] **The faucet has gas.** The faucet wallet (the attester's, unless the server sets a separate
-      `FAUCET_PRIVATE_KEY`) needs test BNB: each new wallet gets 0.03. By default the faucet funds
-      5 wallets per network address per hour and 200 in all; a room on one wifi shares one
-      address, so raise `FAUCET_PER_IP_PER_HOUR` for the event.
+      Done for Bangkok: "Bangkok Demo Run"
+      [`0xcF7957Dc48E5c16732331d27E2C2a1b2A9FA5876`](https://testnet.bscscan.com/address/0xcF7957Dc48E5c16732331d27E2C2a1b2A9FA5876),
+      opened 26 Nov 2026 with `scripts/run-round.ts` (deposit 100 test USD, goal 12 check-ins,
+      deadline 30 Nov 2026 00:34 UTC). The pool was sponsored up to 1,500 test USD at once, so
+      only check-ins decide the launch. Three script wallets joined (Ana, Ben, Chai); Ana and Ben
+      checked in on 26 Nov UTC, and Ana again after 27 Nov 00:00 UTC, so the split reads 2 : 1 : 0
+      before the judges add theirs. It is the featured round, first on Home.
+- [ ] **The faucet has gas.** The faucet has its own wallet
+      (`0xaC33dE0fe7C7a2e779A9Ba9C116C1fFe0aCd19f8`, `FAUCET_PRIVATE_KEY`), funded with 0.5 test
+      BNB on 26 Nov; each new wallet gets `FAUCET_DRIP_BNB` (0.012 for the event, so about 40
+      wallets). A room on one wifi shares one network address: the event runs with
+      `FAUCET_PER_IP_PER_HOUR=100`.
 - [ ] **A recorded run is ready** in case the network fails.
