@@ -236,6 +236,58 @@ void main() {
       },
     );
 
+    test('the faucet will not fill the wallet again: one sentence at once, '
+        'no 45-second wait', () async {
+      final chain = FakeChain(bnb: 0.0001);
+      final server = FakeServer()
+        ..faucet = {
+          'funded': false,
+          'bnbTx': null,
+          'reason': 'already_funded',
+          'message': 'this wallet was already funded once',
+        };
+      final state = AppState(
+        store: MemoryStore(key: testKey, onboarded: true),
+        chain: chain,
+        api: server.api,
+        health: FakeHealth(),
+        clock: () => fixedNow,
+        gasPoll: const Duration(seconds: 3),
+        gasPollTries: 15,
+      );
+      await state.init();
+      final watch = Stopwatch()..start();
+      await expectLater(
+        state.getTestDollars(usd(1000)),
+        throwsA(predicate((e) => '$e'.contains(AppState.faucetDoneMessage))),
+      );
+      // One short look (3 s), not 15 x 3 s.
+      expect(watch.elapsed, lessThan(const Duration(seconds: 10)));
+      expect(chain.calls, isEmpty);
+      expect(state.funding, isFalse);
+    }, timeout: const Timeout(Duration(seconds: 30)));
+
+    test('after "sent", the background top-up reads the balance until the '
+        'transfer lands', () async {
+      final chain = SlowFaucetChain(3);
+      final server = FakeServer();
+      final state = AppState(
+        store: MemoryStore(key: testKey, onboarded: true),
+        chain: chain,
+        api: server.api,
+        health: FakeHealth(),
+        clock: () => fixedNow,
+        gasPoll: Duration.zero,
+        gasPollTries: 5,
+      );
+      await state.init();
+      for (var i = 0; i < 20 && state.bnb == BigInt.zero; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(server.count('POST /faucet'), 1);
+      expect(state.bnb, usd(0.03), reason: 'Wallet shows the faucet gas');
+    });
+
     test(
       'launching needs the whole 7,000,000 gas limit in the wallet',
       () async {

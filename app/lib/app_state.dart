@@ -612,13 +612,21 @@ class AppState extends ChangeNotifier {
 
   // Gas -----------------------------------------------------------------------
 
-  /// Background top-up for a wallet with no gas. Never throws.
+  /// Background top-up for a wallet with no gas. Never throws. When the
+  /// faucet sends, the balance is read again until the transfer has landed,
+  /// so the Wallet tab does not keep showing 0 test BNB.
   Future<void> _fundIfEmpty() async {
     if (!hasWallet) return;
     if (!await refreshBalances() || bnb >= AppConfig.smallGasWei) return;
     try {
-      await requestFaucet();
-      await refreshBalances();
+      final answer = await requestFaucet();
+      if (!answer.funded) return;
+      final before = bnb;
+      for (var i = 0; i < gasPollTries; i++) {
+        await refreshBalances();
+        if (bnb > before || !hasWallet) return;
+        await Future<void>.delayed(gasPoll);
+      }
     } catch (_) {
       // ensureGas asks again before the first transaction.
     }
@@ -626,10 +634,43 @@ class AppState extends ChangeNotifier {
 
   Future<FaucetResult>? _faucetRun;
 
+  /// When the faucet last said it sent test BNB to this wallet. Its transfer
+  /// may still be on its way for a while after that.
+  DateTime? _faucetSentAt;
+
+  /// How long after the faucet's "sent" the app keeps waiting for it.
+  static const Duration faucetLanding = Duration(seconds: 90);
+
   /// Asks the server's faucet for a little test BNB (gas only). Calls made
   /// while one is running share its answer, so the faucet is asked once.
-  Future<FaucetResult> requestFaucet() =>
-      _faucetRun ??= api.faucet(key!).whenComplete(() => _faucetRun = null);
+  Future<FaucetResult> requestFaucet() => _faucetRun ??= api
+      .faucet(key!)
+      .then((answer) {
+        if (answer.funded) _faucetSentAt = DateTime.now();
+        return answer;
+      })
+      .whenComplete(() => _faucetRun = null);
+
+  /// True while a transfer the faucet said it sent may not have landed yet.
+  bool get _faucetOnItsWay {
+    final at = _faucetSentAt;
+    return at != null && DateTime.now().difference(at) < faucetLanding;
+  }
+
+  /// The faucet's refusals that asking again later does not change.
+  static const _faucetDone = {
+    'already_funded',
+    'has_funds',
+    'cap_reached',
+    'faucet_empty',
+    'faucet_disabled',
+  };
+
+  /// The sentence when the faucet will not fill this wallet again.
+  static const faucetDoneMessage =
+      'This wallet needs more test BNB for network fees and the faucet only '
+      'fills a wallet once. Send test BNB to your address (Wallet, then '
+      'Address), then try again.';
 
   /// Called before every transaction: makes sure the wallet holds [need] of
   /// test BNB, asking the faucet and waiting for its transfer when it does
@@ -640,25 +681,37 @@ class AppState extends ChangeNotifier {
     if (bnb >= need) return;
     funding = true;
     notifyListeners();
+    String? refused;
     try {
+      FaucetResult? answer;
       try {
-        await requestFaucet();
+        answer = await requestFaucet();
       } catch (_) {
-        // The faucet serves an address once; the balance check decides.
+        // The server could not be asked; the balance check decides.
       }
-      for (var i = 0; i < gasPollTries; i++) {
+      // The faucet sent nothing and nothing it sent earlier is on its way:
+      // waiting 45 seconds for gas that cannot come only hides the answer.
+      // One short look covers a transfer from before a reload.
+      final waitFor = answer != null && !answer.funded && !_faucetOnItsWay
+          ? (gasPollTries < 2 ? gasPollTries : 2)
+          : gasPollTries;
+      if (answer != null && !answer.funded) refused = answer.reason ?? '';
+      for (var i = 0; i < waitFor; i++) {
         await refreshBalances();
         if (bnb >= need) return;
-        await Future<void>.delayed(gasPoll);
+        if (i < waitFor - 1) await Future<void>.delayed(gasPoll);
       }
     } finally {
       funding = false;
       notifyListeners();
     }
+    if (shortMessage != null) throw Exception(shortMessage);
+    if (refused != null && _faucetDone.contains(refused)) {
+      throw Exception(faucetDoneMessage);
+    }
     throw Exception(
-      shortMessage ??
-          'Your wallet has no test BNB for network fees yet. Try again in a '
-              'minute.',
+      'Your wallet has no test BNB for network fees yet. Try again in a '
+      'minute.',
     );
   }
 
@@ -1366,7 +1419,7 @@ class AppState extends ChangeNotifier {
         // The faucet fills a wallet once, so waiting does not help here: the
         // sentence says where more comes from.
         shortMessage:
-            'Starting a round needs about 0.007 test BNB in fees and this '
+            'Starting a round needs about 0.006 test BNB in fees and this '
             'wallet has less. Send test BNB to your address (Wallet, then '
             'Address), then try again.',
       );

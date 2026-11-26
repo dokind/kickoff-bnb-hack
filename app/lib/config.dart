@@ -288,16 +288,25 @@ class AppConfig {
 
   /// Test BNB a wallet must hold before the app sends a small transaction
   /// (mint, approve, join, check in, claim, refund). Below it the app asks
-  /// the faucet and waits.
-  static final BigInt smallGasWei = _gwei(1000000); // 0.001 tBNB
+  /// the faucet and waits. The largest small step is a join with its mint
+  /// and approve (500,000 gas, as much as a claim): 0.0005 tBNB. It was
+  /// 0.001, which locked a wallet that had just started a round (about
+  /// 0.0009 left) out of joining it.
+  static final BigInt smallGasWei = _gwei(
+    GasLimit.mint + GasLimit.approve + GasLimit.join,
+  ); // 0.0005 tBNB
 
   /// Test BNB needed before `launch()`: its gas limit at 1 gwei, plus room.
   static final BigInt launchGasWei = _gwei(GasLimit.launch + 500000);
 
   /// Test BNB needed before starting a round: the Portal's 0.005 tBNB salt
-  /// lock fee plus the gas.
+  /// lock fee plus the gas limit, exactly what the node checks before it
+  /// takes the transaction (0.0059 tBNB). No extra room on top: with the
+  /// old 500,000-gas buffer (0.0065) a wallet that had started one round
+  /// from the faucet's 0.012 (about 0.0064 left) could never start a second
+  /// one, although the chain would have taken it.
   static final BigInt startRoundGasWei =
-      _gwei(5000000) + _gwei(GasLimit.newLauncher + 500000);
+      _gwei(5000000) + _gwei(GasLimit.newLauncher);
 }
 
 /// Explicit gas limits, measured on a fork of BSC testnet (see
@@ -311,5 +320,7 @@ class GasLimit {
   static const int launch = 7000000;
   static const int refund = 200000;
   static const int claim = 500000;
-  static const int newLauncher = 1000000;
+
+  /// Measured 610,545 on a fork and 532,587 live on BSC testnet.
+  static const int newLauncher = 900000;
 }

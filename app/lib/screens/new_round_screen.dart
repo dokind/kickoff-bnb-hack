@@ -727,9 +727,9 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
       if (!typing) ...[
         const SizedBox(height: Space.s2),
         Text(
-          // About 0.007 test BNB: the Portal's 0.005 fee plus the gas (see
+          // About 0.006 test BNB: the Portal's 0.005 fee plus the gas (see
           // AppConfig.startRoundGasWei). The creator is not made a member.
-          'Costs about 0.007 test BNB in fees. You join from Home like '
+          'Costs about 0.006 test BNB in fees. You join from Home like '
           'everyone else.',
           textAlign: TextAlign.center,
           style: t.body(12).copyWith(color: c.text2),

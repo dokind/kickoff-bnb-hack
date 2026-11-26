@@ -2537,7 +2537,7 @@ void main() {
       expect(button('Start round'), findsOneWidget);
       expect(
         find.text(
-          'Costs about 0.007 test BNB in fees. You join from Home like '
+          'Costs about 0.006 test BNB in fees. You join from Home like '
           'everyone else.',
         ),
         findsOneWidget,
@@ -2843,7 +2843,7 @@ void main() {
       final field = find.byKey(const Key('round-name'));
       final bar = find.byKey(const Key('new-round-action'));
       const fee =
-          'Costs about 0.007 test BNB in fees. You join from Home like '
+          'Costs about 0.006 test BNB in fees. You join from Home like '
           'everyone else.';
       expect(find.text(fee), findsOneWidget);
       // Where the pinned action stops being see-through.
@@ -2897,7 +2897,7 @@ void main() {
         await settle(tester, 12);
         expect(
           find.text(
-            'Starting a round needs about 0.007 test BNB in fees and this '
+            'Starting a round needs about 0.006 test BNB in fees and this '
             'wallet has less. Send test BNB to your address (Wallet, then '
             'Address), then try again.',
           ),

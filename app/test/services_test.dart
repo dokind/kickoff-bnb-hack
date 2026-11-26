@@ -146,13 +146,37 @@ void main() {
     test('every transaction has an explicit gas limit; launch 7,000,000', () {
       expect(AppConfig.gasPriceWei, BigInt.from(1000000000));
       expect(GasLimit.launch, 7000000);
-      expect(GasLimit.newLauncher, 1000000);
+      // Measured 610,545 on a fork, 532,587 live.
+      expect(GasLimit.newLauncher, 900000);
       expect(GasLimit.claim, 500000);
       expect(GasLimit.join, 250000);
       expect(GasLimit.checkIn, 200000);
       // The wallet must hold the whole limit before the launch is sent.
       expect(
         AppConfig.launchGasWei > BigInt.from(7000000) * AppConfig.gasPriceWei,
+        isTrue,
+      );
+    });
+
+    test('a wallet that started one round from the faucet can start a '
+        'second, and join it', () {
+      BigInt bnb(double x) => BigInt.from(x * 1e18);
+      // Exactly the salt fee plus the gas limit, what the node checks.
+      expect(AppConfig.startRoundGasWei, bnb(0.0059));
+      // Live: the faucet's 0.012, a mint, one round started: 0.006416 left.
+      expect(AppConfig.startRoundGasWei <= bnb(0.006416), isTrue);
+      // After the second round (about 0.00553) about 0.00088 is left:
+      // still enough for mint + approve + join, and for a claim.
+      expect(AppConfig.smallGasWei <= bnb(0.00088), isTrue);
+      expect(
+        AppConfig.smallGasWei >=
+            BigInt.from(GasLimit.mint + GasLimit.approve + GasLimit.join) *
+                AppConfig.gasPriceWei,
+        isTrue,
+      );
+      expect(
+        AppConfig.smallGasWei >=
+            BigInt.from(GasLimit.claim) * AppConfig.gasPriceWei,
         isTrue,
       );
     });
