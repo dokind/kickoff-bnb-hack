@@ -422,7 +422,7 @@ Done and checked:
   vault factory, the Portal and the test USD token, and the registry's `announcer()` is the attester.
 - **Server.** 171 tests in 10 files pass and the strict typecheck passes (run 26 November 2026,
   while the origin announcer and the separate faucet key were being added).
-- **App.** `flutter analyze` is clean and 335 tests pass, with one more (the fork test) skipped
+- **App.** `flutter analyze` is clean and 416 tests pass, with one more (the fork test) skipped
   unless it is given a fork (run 26 November 2026).
 - **Many rounds, on the hosted server.** The factory's creation events named three rounds and
   `/api/rounds` listed the same three, including "morning movers", which was started from the app.
