@@ -41,3 +41,6 @@ scripts/*-result.json
 app/assets/brand/original/
 
 .vercel/
+
+# Rendered demo videos (large files): shared outside git
+pitch-video/*.mp4

@@ -1,0 +1,236 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800&family=Barlow:wght@400;500;600;700&display=block" rel="stylesheet">
+<style>
+  :root { --volt:#D4FF3A; --ink:#05080A; --text:#EEF2F3; --text2:rgba(238,242,243,.66); --line:rgba(255,255,255,.12); }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { width:var(--W); height:var(--H); overflow:hidden; background:var(--ink); }
+  body { font-family:'Barlow', sans-serif; color:var(--text); }
+  #stage { position:relative; width:var(--W); height:var(--H); overflow:hidden;
+    background: radial-gradient(1200px 900px at 20% 10%, rgba(64,140,150,.28), transparent 60%),
+                radial-gradient(1000px 800px at 85% 85%, rgba(212,255,58,.10), transparent 60%), var(--ink); }
+  .glow { position:absolute; width:900px; height:900px; border-radius:50%; filter:blur(120px); opacity:.35;
+    background: radial-gradient(circle, rgba(70,150,160,.55), transparent 70%); }
+  .scene { position:absolute; inset:0; opacity:0; }
+  .disp { font-family:'Barlow Condensed', sans-serif; font-weight:800; font-style:italic; text-transform:uppercase; letter-spacing:-.01em; line-height:.92; }
+  .volt { color:var(--volt); }
+  .muted { color:var(--text2); }
+  .over { font-weight:600; letter-spacing:.22em; text-transform:uppercase; font-size:30px; color:var(--text2); }
+  .chip { display:inline-flex; align-items:center; gap:14px; padding:16px 28px; border-radius:999px; border:1.5px solid var(--line);
+    background:rgba(255,255,255,.06); font-size:34px; font-weight:600; }
+  .card { border-radius:36px; border:1.5px solid var(--line); background:linear-gradient(160deg, rgba(255,255,255,.09), rgba(255,255,255,.03)); }
+  .phone { position:absolute; border-radius:64px; overflow:hidden; background:#000; border:3px solid rgba(255,255,255,.16);
+    box-shadow: 0 40px 120px rgba(0,0,0,.6), 0 0 0 10px rgba(255,255,255,.03); }
+  .phone video { width:100%; height:100%; object-fit:cover; display:block; }
+  .phone .tag { position:absolute; left:50%; top:26px; transform:translateX(-50%); padding:10px 22px; border-radius:999px; background:rgba(0,0,0,.7);
+    font-size:26px; font-weight:600; letter-spacing:.06em; opacity:0; white-space:nowrap; }
+  .cap { position:absolute; font-weight:700; line-height:1.15; text-shadow:0 4px 30px rgba(0,0,0,.6); }
+  .fine { position:absolute; font-size:24px; color:var(--text2); line-height:1.3; }
+  .pill { position:absolute; top:44px; right:52px; padding:10px 20px; border-radius:999px; border:1.5px solid var(--line); font-size:24px; font-weight:700; letter-spacing:.16em; color:var(--text2); z-index:20; }
+  .brand { position:absolute; top:40px; left:52px; display:flex; align-items:center; gap:16px; font-weight:700; letter-spacing:.2em; font-size:26px; z-index:20; }
+  .ticks { display:flex; gap:12px; align-items:flex-end; }
+  .ticks i { display:block; width:14px; height:70px; border-radius:7px; background:rgba(255,255,255,.18); }
+  .ticks i.on { background:var(--text); }
+  .ticks i.head { background:var(--volt); height:92px; }
+  .row { display:flex; align-items:center; gap:28px; }
+  .x { color:#ff7a6b; font-weight:800; }
+  .flow { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+  .arrow { color:var(--volt); font-weight:800; font-size:56px; }
+  .qr { background:#fff; border-radius:28px; padding:22px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="glow" id="glow1"></div>
+  <div class="brand"><svg width="54" height="40" viewBox="0 0 54 40"><polygon points="14,0 54,0 44,18 4,18" fill="#D4FF3A"/><polygon points="10,22 40,22 30,40 0,40" fill="#D4FF3A"/></svg><span>CYPHER RUN</span></div>
+  <div class="pill">BSC TESTNET</div>
+
+  <!-- phone with footage (shared by app scenes) -->
+  <div class="phone" id="phone"><video id="vapp" src="raw/sim_app_p.mp4" muted preload="auto"></video><video id="vhealth" src="raw/sim_health_p.mp4" muted preload="auto" style="position:absolute;inset:0;opacity:0"></video><div class="tag" id="ptag"></div></div>
+  <div class="cap" id="cap"></div>
+  <div class="fine" id="fine"></div>
+
+  <!-- s1 hook -->
+  <div class="scene" id="s1"><div id="s1in" style="position:absolute">
+    <div class="disp s1a" style="font-size:var(--hero)">SHOW UP.</div>
+    <div class="disp volt s1b" style="font-size:var(--hero)">GET PAID.</div>
+    <div class="s1c" style="font-size:44px;font-weight:600;margin-top:34px;max-width:900px">by the people who <span class="volt">also showed up.</span></div>
+  </div></div>
+
+  <!-- s2 problem -->
+  <div class="scene" id="s2"><div id="s2in" style="position:absolute">
+    <div class="over s2a">The problem</div>
+    <div class="disp s2b" style="font-size:var(--big);margin-top:24px">MOST GOALS DIE<br>IN <span class="volt">WEEK TWO.</span></div>
+    <div class="s2c" style="margin-top:56px;display:flex;flex-direction:column;align-items:flex-start;gap:22px">
+      <div class="chip s2d"><span class="x">✕</span> Badges don't keep you going</div>
+      <div class="chip s2e"><span class="x">✕</span> Betting apps win when you lose</div>
+    </div>
+  </div></div>
+
+  <!-- s3 idea -->
+  <div class="scene" id="s3"><div id="s3in" style="position:absolute">
+    <div class="over s3a">The idea</div>
+    <div class="disp s3b" style="font-size:var(--big);margin-top:24px">DEPOSIT.<br>WALK DAILY.<br><span class="volt">FILL ONE BAR.</span></div>
+    <div class="ticks s3c" id="s3ticks" style="margin-top:60px"></div>
+    <div class="s3d muted" style="font-size:34px;margin-top:26px">Every check-in, from everyone, fills the same bar.</div>
+  </div></div>
+
+  <!-- s7 launch card -->
+  <div class="scene" id="s7"><div id="s7in" style="position:absolute">
+    <div class="over s7a">When the bar is full</div>
+    <div class="disp s7b" style="font-size:var(--big);margin-top:24px">THE TOKEN<br>LAUNCHES <span class="volt">ON FLAP.</span></div>
+    <div class="card s7c" style="margin-top:50px;padding:40px 44px;font-size:38px;line-height:1.5">
+      <div><span class="volt" style="font-weight:700">Prize</span> + <span class="volt" style="font-weight:700">half the supply</span> + <span class="volt" style="font-weight:700">80% of trading tax</span></div>
+      <div class="muted" style="margin-top:8px">shared by days shown up. 0 days = nothing back.</div>
+    </div>
+  </div></div>
+
+  <!-- s8 marathon -->
+  <div class="scene" id="s8"><div id="s8in" style="position:absolute">
+    <div class="over s8a">Example · Marathon</div>
+    <div class="disp s8b" style="font-size:var(--big);margin-top:24px">TRAIN FOR<br>THE <span class="volt">RACE.</span></div>
+    <div class="s8c" style="margin-top:50px;display:flex;flex-direction:column;align-items:flex-start;gap:22px">
+      <div class="chip s8d">The race sponsors the token pool</div>
+      <div class="chip s8e">6-week training round, check in each run</div>
+      <div class="chip s8f"><span class="volt">Trained most → earned most</span></div>
+    </div>
+  </div></div>
+
+  <!-- s9 charity -->
+  <div class="scene" id="s9"><div id="s9in" style="position:absolute">
+    <div class="over s9a">Example · Charity walk</div>
+    <div class="disp s9b" style="font-size:var(--big);margin-top:24px">WALK FOR<br>A <span class="volt">CAUSE.</span></div>
+    <div class="s9c" style="margin-top:50px;display:flex;flex-direction:column;align-items:flex-start;gap:22px">
+      <div class="chip s9d">A sponsor funds the token pool</div>
+      <div class="chip s9e">Supporters walk every day</div>
+      <div class="chip s9f"><span class="volt">Members can give what they earn</span></div>
+    </div>
+    <div class="s9g muted" style="font-size:26px;margin-top:26px">Built-in charity payout: next on the roadmap.</div>
+  </div></div>
+
+  <!-- s10 trust -->
+  <div class="scene" id="s10"><div id="s10in" style="position:absolute">
+    <div class="over s10a">Trust</div>
+    <div class="disp s10b" style="font-size:var(--big);margin-top:24px">NOBODY HOLDS<br>THE <span class="volt">MONEY.</span></div>
+    <div class="s10c" style="margin-top:50px;display:flex;flex-direction:column;align-items:flex-start;gap:22px">
+      <div class="chip s10d">Contracts on BNB Smart Chain</div>
+      <div class="chip s10e">Launched through Flap Pool Launch</div>
+      <div class="chip s10f"><span class="volt">Group falls short? Deposits come back.</span></div>
+    </div>
+  </div></div>
+
+  <!-- s11 end -->
+  <div class="scene" id="s11"><div id="s11in" style="position:absolute">
+    <svg class="s11a" width="150" height="112" viewBox="0 0 54 40"><polygon points="14,0 54,0 44,18 4,18" fill="#D4FF3A"/><polygon points="10,22 40,22 30,40 0,40" fill="#D4FF3A"/></svg>
+    <div class="disp s11b" style="font-size:var(--big);margin-top:36px">SHOW UP.<br><span class="volt">GET PAID</span><br>BY WHO ALSO DID.</div>
+    <div class="s11c" style="margin-top:44px;font-size:40px;font-weight:700">dokind.github.io/kickoff-bnb-hack</div>
+    <div class="s11d muted" style="margin-top:14px;font-size:30px">iPhone: TestFlight · Android: APK · Web: no install</div>
+    <div class="s11e muted" style="margin-top:30px;font-size:26px">BSC testnet · test money only · BNB Hack Bangkok 2026</div>
+  </div></div>
+</div>
+
+<script>
+const P = new URLSearchParams(location.search);
+const LAND = P.get('layout') === 'landscape';
+const W = LAND ? 1920 : 1080, H = LAND ? 1080 : 1920;
+document.documentElement.style.setProperty('--W', W + 'px');
+document.documentElement.style.setProperty('--H', H + 'px');
+document.documentElement.style.setProperty('--hero', LAND ? '190px' : '210px');
+document.documentElement.style.setProperty('--big', LAND ? '120px' : '132px');
+
+// Layout: card scenes text block, phone box and caption box.
+for (const id of ['s1','s2','s3','s7','s8','s9','s10','s11']) {
+  const el = document.getElementById(id + 'in');
+  if (LAND) { el.style.left = '160px'; el.style.top = id === 's11' ? '150px' : '190px'; el.style.width = '1500px'; }
+  else { el.style.left = '90px'; el.style.top = id === 's1' ? '700px' : (id === 's11' ? '560px' : '580px'); el.style.width = '900px'; }
+}
+const phone = document.getElementById('phone');
+const PH = LAND ? 960 : 1380, PW = Math.round(PH * 780 / 1688);
+phone.style.width = PW + 'px'; phone.style.height = PH + 'px';
+phone.style.left = (LAND ? 260 : (W - PW) / 2) + 'px'; phone.style.top = (LAND ? 60 : 170) + 'px';
+const cap = document.getElementById('cap');
+const fine = document.getElementById('fine');
+if (LAND) { cap.style.left = '920px'; cap.style.top = '330px'; cap.style.width = '880px'; cap.style.fontSize = '72px';
+  fine.style.left = '920px'; fine.style.top = '880px'; fine.style.width = '860px'; }
+else { cap.style.left = '70px'; cap.style.top = '1600px'; cap.style.width = '940px'; cap.style.fontSize = '58px'; cap.style.textAlign = 'center';
+  fine.style.left = '90px'; fine.style.top = '1830px'; fine.style.width = '900px'; fine.style.textAlign = 'center'; }
+const glow = document.getElementById('glow1');
+
+// ticks for s3
+const tk = document.getElementById('s3ticks'); const NT = LAND ? 40 : 34;
+for (let i = 0; i < NT; i++) tk.appendChild(document.createElement('i'));
+
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const easeOut = x => 1 - Math.pow(1 - clamp(x), 3);
+function show(el, lt, at, dur = .5, dy = 40) {
+  const k = easeOut((lt - at) / dur);
+  el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dy}px)`;
+}
+function q(s) { return document.querySelector(s); }
+
+let TL = null; // [{id, start, dur, clips?}]
+window.init = (tl) => { TL = tl; return true; };
+
+// clip plans: [videoId, srcFrom, srcTo, outDur, tag, caption]
+async function seek(v, t) {
+  if (Math.abs(v.currentTime - t) < 0.001 && v.readyState >= 2) return;
+  await new Promise(res => { const done = () => { v.removeEventListener('seeked', done); res(); }; v.addEventListener('seeked', done); v.currentTime = t; });
+}
+
+window.render = async (t) => {
+  // ambient glow drift
+  glow.style.left = (W * .5 + Math.sin(t * .25) * W * .25 - 450) + 'px';
+  glow.style.top = (H * .35 + Math.cos(t * .2) * H * .15 - 450) + 'px';
+  let phoneOn = false, capText = '', fineText = '', tagText = '', capK = 0;
+  for (const s of TL) {
+    const lt = t - s.start;
+    const el = document.getElementById(s.id);
+    // Warm the first clip of the next scene so its first frame is ready before it fades in.
+    if (s.clips && lt >= -1.2 && lt < -0.2) {
+      const c0 = s.clips[0], v0 = document.getElementById(c0.v);
+      if (Math.abs(v0.currentTime - c0.from) > 0.05) await seek(v0, c0.from);
+    }
+    const active = lt >= -0.2 && lt < s.dur + 0.25;
+    const fade = clamp(Math.min((lt + 0.2) / 0.35, (s.dur + 0.25 - lt) / 0.35));
+    if (el) el.style.opacity = active ? fade : 0;
+    if (!active) continue;
+    if (s.clips) {
+      phoneOn = true;
+      // walk the clip list
+      let acc = 0, cur = s.clips[s.clips.length - 1], local = 0;
+      for (const c of s.clips) { if (lt < acc + c.out) { cur = c; local = Math.max(0, lt - acc); break; } acc += c.out; local = c.out; }
+      const v = document.getElementById(cur.v); const other = document.getElementById(cur.v === 'vapp' ? 'vhealth' : 'vapp');
+      v.style.opacity = 1; other.style.opacity = 0;
+      const src = cur.from + Math.min(local, cur.out) * (cur.to - cur.from) / cur.out;
+      await seek(v, Math.min(src, cur.to));
+      capText = cur.cap || ''; tagText = cur.tag || ''; fineText = s.fine || '';
+      capK = fade * clamp((local + 0.05) / 0.3);
+      phone.style.opacity = fade;
+      const sc = 0.96 + 0.04 * easeOut((lt + .2) / .6);
+      phone.style.transform = `scale(${sc})`;
+    }
+    // per-scene entrance staggers
+    const st = (sel, at, dur, dy) => { const e = q(sel); if (e) show(e, lt, at, dur, dy); };
+    if (s.id === 's1') { st('.s1a', .0, .55, 60); st('.s1b', .35, .55, 60); st('.s1c', .9, .6); }
+    if (s.id === 's2') { st('.s2a', 0, .4); st('.s2b', .15, .5); st('.s2d', 1.6, .5); st('.s2e', 2.9, .5); }
+    if (s.id === 's3') { st('.s3a', 0, .4); st('.s3b', .15, .55); st('.s3c', .6, .4); st('.s3d', 1.2, .5);
+      const n = Math.round(NT * easeOut((lt - 1.0) / 4.0) * .72);
+      [...tk.children].forEach((e, i) => { e.className = i < n - 1 ? 'on' : (i === n - 1 ? 'head' : ''); }); }
+    if (s.id === 's7') { st('.s7a', 0, .4); st('.s7b', .15, .55); st('.s7c', 1.0, .6); }
+    if (s.id === 's8') { st('.s8a', 0, .4); st('.s8b', .15, .55); st('.s8d', 1.2, .45); st('.s8e', 2.6, .45); st('.s8f', 4.0, .45); }
+    if (s.id === 's9') { st('.s9a', 0, .4); st('.s9b', .15, .55); st('.s9d', 1.2, .45); st('.s9e', 2.5, .45); st('.s9f', 3.8, .45); st('.s9g', 4.6, .5); }
+    if (s.id === 's10') { st('.s10a', 0, .4); st('.s10b', .15, .55); st('.s10d', 1.6, .45); st('.s10e', 2.6, .45); st('.s10f', 3.6, .45); }
+    if (s.id === 's11') { st('.s11a', 0, .5, 20); st('.s11b', .2, .6); st('.s11c', 1.0, .5); st('.s11d', 1.4, .5); st('.s11e', 1.8, .5); }
+  }
+  if (!phoneOn) phone.style.opacity = 0;
+  cap.innerHTML = capText; cap.style.opacity = capK; cap.style.transform = `translateY(${(1 - capK) * 20}px)`;
+  fine.textContent = fineText; fine.style.opacity = capK * 0.9;
+  const tag = document.getElementById('ptag'); tag.textContent = tagText; tag.style.opacity = tagText ? capK : 0;
+  return true;
+};
+</script>
+</body>
+</html>

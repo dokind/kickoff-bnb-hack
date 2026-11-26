@@ -1,0 +1,100 @@
+1
+00:00:00,500 --> 00:00:04,427
+What if showing up every day paid you, and paid you more than the people who didn't?
+
+2
+00:00:05,177 --> 00:00:07,134
+Most fitness goals die in week two.
+
+3
+00:00:07,134 --> 00:00:10,825
+Badges don't stop that, and betting apps make money when you fail.
+
+4
+00:00:11,575 --> 00:00:12,778
+Cypher Run flips it.
+
+5
+00:00:12,778 --> 00:00:18,254
+Everyone puts in a small deposit, walks every day, and every check-in fills one shared bar.
+
+6
+00:00:19,004 --> 00:00:20,281
+Joining takes one tap.
+
+7
+00:00:20,281 --> 00:00:25,792
+On testnet the app gets you free test dollars, pays the deposit, and drops you into your round.
+
+8
+00:00:27,804 --> 00:00:28,622
+Then you walk.
+
+9
+00:00:28,622 --> 00:00:32,535
+Cypher Run reads today's steps from Apple Health or Health Connect.
+
+10
+00:00:32,535 --> 00:00:33,120
+Read only.
+
+11
+00:00:33,120 --> 00:00:37,091
+Pass a thousand steps, check in, and your share updates on the spot.
+
+12
+00:00:40,004 --> 00:00:44,683
+Your round shows what you'd get if it launched right now, and how every ending plays out.
+
+13
+00:00:44,683 --> 00:00:47,312
+If the group falls short, your deposit comes back.
+
+14
+00:00:48,404 --> 00:00:52,075
+When the bar is full, anyone can launch the round's token on Flap.
+
+15
+00:00:52,075 --> 00:00:57,358
+The prize, half the supply, and the trading fees go to the people who showed up, split by days.
+
+16
+00:00:57,358 --> 00:01:03,976
+This real testnet round paid eight hundred twenty two, four hundred eleven, and nothing to the member who never walked.
+
+17
+00:01:04,604 --> 00:01:05,878
+Run it for a marathon.
+
+18
+00:01:05,878 --> 00:01:11,497
+The race sponsors the pool, runners train for six weeks, and the ones who trained most earn most.
+
+19
+00:01:12,247 --> 00:01:13,238
+Or a charity walk.
+
+20
+00:01:13,238 --> 00:01:18,858
+A sponsor funds the pool, supporters walk every day, and members can give what they earn to the cause.
+
+21
+00:01:19,608 --> 00:01:21,081
+Nobody holds the money.
+
+22
+00:01:21,081 --> 00:01:21,850
+Not even us.
+
+23
+00:01:21,850 --> 00:01:25,757
+It's all contracts on BNB Smart Chain, launched through Flap.
+
+24
+00:01:26,507 --> 00:01:27,187
+Cypher Run.
+
+25
+00:01:27,187 --> 00:01:30,586
+Show up, and get paid by the people who also showed up.
+
