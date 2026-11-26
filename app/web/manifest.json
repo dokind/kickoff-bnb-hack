@@ -4,7 +4,7 @@
     "start_url": "./",
     "scope": "./",
     "display": "standalone",
-    "background_color": "#0A0E11",
+    "background_color": "#05080A",
     "theme_color": "#0A0E11",
     "description": "Pay in. Show up each day. Split the prize. BNB Smart Chain testnet, test USD only.",
     "orientation": "portrait-primary",

@@ -666,10 +666,40 @@ void main() {
       expect(find.text('Keep going'), findsOneWidget);
       expect(enabled(tester, 'Check in'), isFalse);
       health.steps = 1200;
-      await tester.tap(button('Read my steps again'));
+      await tester.tap(button('Sync again'));
       await settle(tester);
       expect(find.text('1,200'), findsOneWidget);
       expect(enabled(tester, 'Check in'), isTrue);
+    });
+
+    testWidgets('phone: no steps read is no dead end; typed steps go as '
+        '"self"', (tester) async {
+      final chain = FakeChain(isMember: true);
+      final server = FakeServer();
+      final health = FakeHealth(available: true, steps: 0);
+      final state = await makeState(
+        chain: chain,
+        server: server,
+        health: health,
+      );
+      await pumpBody(tester, CheckInSheet(state: state, round: state.round!));
+
+      expect(find.text('No steps from Health Connect today.'), findsOneWidget);
+      expect(button('Sync again'), findsOneWidget);
+      expect(button('Fix in Health Connect'), findsOneWidget);
+      expect(enabled(tester, 'Check in'), isFalse);
+      await tester.ensureVisible(find.text('Type today\'s steps instead'));
+      await tester.pump();
+      await tester.tap(find.text('Type today\'s steps instead'));
+      await settle(tester);
+      expect(find.text('Self-reported, testnet only'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('steps')), '4321');
+      await press(tester, 'Check in');
+      await settle(tester);
+      expect(server.bodies['/rounds/$launcher/checkin']!['steps'], 4321);
+      expect(server.bodies['/rounds/$launcher/checkin']!['source'], 'self');
+      expect(chain.calls, ['checkIn 20782']);
+      expect(find.text('CHECKED IN.'), findsOneWidget);
     });
 
     testWidgets('the server\'s refusal is shown as its own sentence', (

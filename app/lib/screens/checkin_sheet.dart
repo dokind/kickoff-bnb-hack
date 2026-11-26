@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/health_service.dart';
 import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
 import '../widgets/gauges.dart';
+import 'health_sheet.dart';
 
 /// Opens the check-in sheet for [round] over the current screen.
 Future<void> showCheckInSheet(
@@ -22,9 +24,14 @@ Future<void> showCheckInSheet(
 /// Today's check-in.
 ///
 /// On a phone the sheet reads today's steps from Apple Health / Health
-/// Connect and shows them against the minimum. In a browser there is no
-/// health store, so it shows a number field labelled "Self-reported, testnet
-/// only". Either way the steps go to the server, which answers with the
+/// Connect and shows them against the minimum. When the read finds nothing
+/// (on an iPhone that is also what a read the person did not allow looks
+/// like) or fails, it does not dead-end: "Sync again", "Fix in Health"
+/// (the Health sheet) and, on this testnet build, "Type today's steps
+/// instead". In a browser there is no health store, so it shows a number
+/// field labelled "Self-reported, testnet only"; typed steps go as source
+/// "self" from a phone too. Either way the steps go to the server, which
+/// answers with the
 /// attester's signature; the app then sends `checkIn(dayIndex, signature)`
 /// itself and shows the transaction.
 ///
@@ -50,13 +57,26 @@ class _CheckInSheetState extends State<CheckInSheet> {
   /// The check-in transaction, once it is mined.
   String? _tx;
 
-  /// Today's steps from the health store. Null while reading or when the
-  /// read failed.
-  int? _steps;
+  /// The last read of the health store. Null before the first read ends.
+  StepsRead? _last;
   bool _reading = false;
 
+  /// On a phone: the person chose to type today's steps (source "self").
+  bool _typing = false;
+
+  late final AppLifecycleListener _life;
+
   AppState get _state => widget.state;
-  bool get _phone => _state.health.available;
+  HealthService get _health => _state.health;
+  bool get _phone => _health.available;
+
+  /// The steps are a number the person types: always in a browser, on a
+  /// phone when they chose to.
+  bool get _typedMode => !_phone || _typing;
+
+  /// Today's steps from the health store. Null while reading or when the
+  /// read found none.
+  int? get _steps => _last?.isOk == true ? _last!.steps : null;
 
   /// The sheet's round as the app reads it now; as it was when the sheet
   /// opened if it has left the slider since.
@@ -66,29 +86,80 @@ class _CheckInSheetState extends State<CheckInSheet> {
   @override
   void initState() {
     super.initState();
-    if (_phone) _read();
+    // Back from the Health app with nothing read yet: read again, without
+    // asking. Coming back to the app must never bring up a permission
+    // screen (on Android each refusal counts towards the limit of two), and
+    // while the Health sheet is open it reads again itself.
+    _life = AppLifecycleListener(
+      onResume: () {
+        if (mounted &&
+            _phone &&
+            !_typing &&
+            !_reading &&
+            !_healthOpen &&
+            _tx == null) {
+          if (!(_last?.isOk ?? false)) _read(ask: false);
+        }
+      },
+    );
+    if (_phone) _firstRead();
+  }
+
+  /// The read when the sheet opens: asks for access only if the app has
+  /// never asked on this device. After that, asking again is a button.
+  Future<void> _firstRead() async {
+    setState(() => _reading = true);
+    final asked = await _health.askedBefore();
+    if (!mounted) return;
+    await _read(ask: !asked);
   }
 
   @override
   void dispose() {
+    _life.dispose();
     _typed.dispose();
     super.dispose();
   }
 
-  Future<void> _read() async {
+  /// Reads today's steps. [ask] is true when the person pressed a button
+  /// that reads (and may ask for access).
+  Future<void> _read({bool ask = true}) async {
     setState(() {
       _reading = true;
       _error = null;
     });
-    try {
-      final steps = await _state.health.stepsToday();
-      if (mounted) setState(() => _steps = steps);
-    } catch (e) {
-      if (mounted) setState(() => _error = friendlyError(e));
-    } finally {
-      if (mounted) setState(() => _reading = false);
+    final read = await _health.readSteps(ask: ask);
+    if (mounted) {
+      setState(() {
+        _last = read;
+        _reading = false;
+      });
     }
   }
+
+  /// The Health sheet is open over this one.
+  bool _healthOpen = false;
+
+  Future<void> _fixInHealth() async {
+    _healthOpen = true;
+    try {
+      await showHealthSheet(
+        context,
+        _health,
+        initial: _last,
+        onRead: (read) {
+          if (mounted) setState(() => _last = read);
+        },
+      );
+    } finally {
+      _healthOpen = false;
+    }
+  }
+
+  void _typeInstead(bool typing) => setState(() {
+    _typing = typing;
+    _error = null;
+  });
 
   Future<void> _checkIn() async {
     setState(() {
@@ -97,7 +168,7 @@ class _CheckInSheetState extends State<CheckInSheet> {
     });
     try {
       final tx = await _state.checkIn(
-        selfReported: _phone ? null : int.tryParse(_typed.text.trim()) ?? 0,
+        selfReported: _typedMode ? int.tryParse(_typed.text.trim()) ?? 0 : null,
         launcher: widget.round.launcher,
       );
       if (mounted) setState(() => _tx = tx);
@@ -164,7 +235,9 @@ class _CheckInSheetState extends State<CheckInSheet> {
     final c = context.colors;
     final min = _round.minSteps;
     final pending = _pending;
-    final enough = pending || !_phone || (_steps ?? 0) >= min;
+    final enough = pending || _typedMode || (_steps ?? 0) >= min;
+    final read = _last;
+    final nothingRead = _phone && !_reading && read != null && !read.isOk;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -187,7 +260,9 @@ class _CheckInSheetState extends State<CheckInSheet> {
         const SizedBox(height: Space.s5),
         if (pending)
           const SizedBox.shrink()
-        else if (_phone)
+        else if (!_typedMode && nothingRead)
+          _noStepsCard(context, read)
+        else if (!_typedMode)
           _stepsCard(context, min)
         else ...[
           const Overline('Steps today'),
@@ -216,10 +291,25 @@ class _CheckInSheetState extends State<CheckInSheet> {
           ),
           const SizedBox(height: 4),
           Text(
-            'A browser cannot read health data. The phone app reads your '
-            'steps from Apple Health or Health Connect instead.',
+            _phone
+                ? 'Typed steps count on this testnet build only. '
+                      '${_health.storeName} is read when it has steps.'
+                : 'A browser cannot read health data. The phone app reads '
+                      'your steps from Apple Health or Health Connect '
+                      'instead.',
             style: t.body(12).copyWith(color: c.text2),
           ),
+          if (_phone) ...[
+            const SizedBox(height: Space.s1),
+            _QuietLink(
+              key: const Key('checkin-use-health'),
+              label: 'Read ${_health.storeName} instead',
+              onPressed: () {
+                _typeInstead(false);
+                _read();
+              },
+            ),
+          ],
         ],
         if (!pending) ...[
           const SizedBox(height: Space.s3),
@@ -362,14 +452,138 @@ class _CheckInSheetState extends State<CheckInSheet> {
           if (!_reading && !enough) ...[
             const SizedBox(height: Space.s3),
             PillButton(
+              key: const Key('checkin-sync'),
               kind: PillKind.glass,
               height: Sizes.buttonSmall,
-              icon: Icons.refresh_rounded,
-              label: 'Read my steps again',
+              icon: Icons.sync_rounded,
+              label: 'Sync again',
               onPressed: _read,
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Phone: the read found no steps, or failed. Never a dead end: read
+  /// again, fix it in the Health sheet, or type the steps (testnet only).
+  /// An iPhone cannot tell an app that reading was turned off, so this
+  /// never says it was.
+  Widget _noStepsCard(BuildContext context, StepsRead read) {
+    final t = context.type;
+    final c = context.colors;
+    final name = _health.storeName;
+    final apple = _health.isAppleHealth;
+    final (String title, String text) = switch (read.result) {
+      StepsResult.notInstalled => (
+        'Health Connect is not on this phone.',
+        'Install it to read your steps, or type them for now.',
+      ),
+      StepsResult.error => (
+        'No steps from $name today.',
+        '$name did not answer. Try again in a moment.',
+      ),
+      _ => (
+        'No steps from $name today.',
+        apple
+            ? 'No steps came from Apple Health. If you turned access off, '
+                  'turn it on in the Health app.'
+            : 'No steps came from Health Connect. If you turned access off, '
+                  'allow Steps in Health Connect.',
+      ),
+    };
+    return GlassCard(
+      key: const Key('checkin-no-steps'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            container: true,
+            liveRegion: true,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    read.result == StepsResult.error
+                        ? Icons.warning_amber_rounded
+                        : Icons.info_outline_rounded,
+                    size: 20,
+                    color: c.text2,
+                  ),
+                ),
+                const SizedBox(width: Space.s3),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: t.body(15, FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(text, style: t.body(13).copyWith(color: c.text2)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: Space.s4),
+          PillButton(
+            key: const Key('checkin-sync'),
+            kind: PillKind.glass,
+            height: Sizes.buttonSmall,
+            icon: Icons.sync_rounded,
+            label: 'Sync again',
+            onPressed: _read,
+          ),
+          const SizedBox(height: Space.s2),
+          PillButton(
+            key: const Key('checkin-fix'),
+            kind: PillKind.glass,
+            height: Sizes.buttonSmall,
+            icon: Icons.favorite_border_rounded,
+            label: apple ? 'Fix in Health' : 'Fix in Health Connect',
+            onPressed: _fixInHealth,
+          ),
+          const SizedBox(height: Space.s1),
+          _QuietLink(
+            key: const Key('checkin-type-instead'),
+            label: 'Type today\'s steps instead',
+            onPressed: () => _typeInstead(true),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A quiet text action, at least 44 high, read as a button.
+class _QuietLink extends StatelessWidget {
+  const _QuietLink({super.key, required this.label, required this.onPressed});
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.type;
+    final c = context.colors;
+    return Center(
+      child: TextButton(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          minimumSize: const Size(Sizes.touch, Sizes.touch),
+          foregroundColor: c.text2,
+        ),
+        child: Text(
+          label,
+          style: t
+              .body(14, FontWeight.w500)
+              .copyWith(
+                color: c.text2,
+                decoration: TextDecoration.underline,
+                decorationColor: c.text2,
+              ),
+        ),
       ),
     );
   }

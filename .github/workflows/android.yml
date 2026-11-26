@@ -1,0 +1,63 @@
+# Builds the Android app and attaches it to the "android-latest" release, so
+# https://github.com/dokind/kickoff-bnb-hack/releases/download/android-latest/cypher-run.apk
+# is always the newest build. Runs on every push to main that touches the app, or by hand.
+#
+# Testnet build: it is signed with the runner's debug key, so a new build may need the old one
+# uninstalled first. The app finds its server through OriginRegistry on BSC testnet, so no server
+# address is built in.
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.9"
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build the APK
+        run: >
+          flutter build apk --release
+          --dart-define=CHECKIN_LAUNCHER_FACTORY=0x2A872200B83dD025977d785cDE05356d23eA4153
+          --dart-define=STREAK_VAULT_FACTORY=0x0652AAD1d659344f6EdB9572723479aaece144Be
+          --dart-define=ATTESTER_ADDRESS=0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7
+          --dart-define=WEB_BASE_URL=https://dokind.github.io/kickoff-bnb-hack
+
+      - name: Publish to the android-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk cypher-run.apk
+          if ! gh release view android-latest >/dev/null 2>&1; then
+            gh release create android-latest --prerelease --title "Cypher Run for Android (testnet)" \
+              --notes "Testnet build of Cypher Run for Android 8.0 and later. Test money only, nothing here has real value. Open the file on your phone and allow installing from your browser. Built from ${GITHUB_SHA}."
+          fi
+          gh release upload android-latest cypher-run.apk --clobber
+          gh release edit android-latest --notes "Testnet build of Cypher Run for Android 8.0 and later. Test money only, nothing here has real value. Open the file on your phone and allow installing from your browser. Built from ${GITHUB_SHA}."

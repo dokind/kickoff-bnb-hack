@@ -1057,16 +1057,16 @@ class AppState extends ChangeNotifier {
   }
 
   /// Today's check-in: sends the steps to the server (read from the health
-  /// store on a phone, [selfReported] in a browser), then records the day on
-  /// chain with the attester's signature. Returns the transaction hash.
+  /// store on a phone, [selfReported] in a browser or when typed on a phone
+  /// as source "self"), then records the day on chain with the attester's
+  /// signature. Returns the transaction hash.
   Future<String> checkIn({int? selfReported, String? launcher}) async {
     final r = _acting(launcher);
     await ensureGas(AppConfig.smallGasWei);
     var ticket = _pendingTicketFor(r);
     if (ticket == null) {
-      final steps = health.available
-          ? await health.stepsToday()
-          : selfReported ?? 0;
+      final typed = selfReported != null || !health.available;
+      final steps = typed ? selfReported ?? 0 : await health.stepsToday();
       if (steps < r.minSteps) {
         throw Exception(
           'A check-in needs at least ${formatCount(r.minSteps)} steps today. '
@@ -1084,7 +1084,7 @@ class AppState extends ChangeNotifier {
         key!,
         launcher: r.launcher,
         steps: steps,
-        source: health.available ? health.source : 'self',
+        source: typed ? 'self' : health.source,
         now: now,
         perRound: !legacyServer,
       );

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../config.dart';
+import '../services/health_service.dart';
 import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
@@ -13,11 +14,13 @@ import '../widgets/dot_matrix.dart';
 import '../widgets/identicon.dart';
 import '../widgets/main_tabs.dart';
 import '../widgets/tab_bar.dart';
+import 'health_sheet.dart';
 
 /// Wallet (`/account`, also `/wallet`): your money and your key, and nothing
-/// else. The balance is the hero. Under it, one list of four rows: the
-/// address (press to copy), "Back up your key", "Use another wallet" and
-/// "About", the last three each a sheet. Nobody has to come here to use the
+/// else. The balance is the hero. Under it, one list of rows: the address
+/// (press to copy), "Back up your key", "Use another wallet", on a phone
+/// "Apple Health" ("Health Connect" on Android; no row in a browser), and
+/// "About", all but the first a sheet. Nobody has to come here to use the
 /// app. The only word about rounds is the money in them ("In rounds", under
 /// the balance, when this wallet is in an open round): starting one and
 /// opening an invite link are behind the "+" on the tab bar.
@@ -111,6 +114,18 @@ class AccountScreen extends StatelessWidget {
                               builder: (_) => ImportKeySheet(state: state),
                             ),
                           ),
+                          if (state.health.available)
+                            ActionRow(
+                              key: const Key('wallet-health'),
+                              icon: Icons.favorite_border_rounded,
+                              title: state.health.storeName,
+                              detail:
+                                  'Today\'s step count, read when you check '
+                                  'in. Sync or fix access here.',
+                              last: false,
+                              onPressed: () =>
+                                  showHealthSheet(context, state.health),
+                            ),
                           ActionRow(
                             key: const Key('wallet-about'),
                             icon: Icons.info_outline_rounded,
