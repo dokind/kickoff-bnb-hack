@@ -109,7 +109,10 @@ class DeviceHealthService implements HealthService, HealthAccess {
       final steps = await _health.getTotalStepsInInterval(
         dayStart,
         now,
-        includeManualEntry: false,
+        // Steps typed into the Health app never count. The one exception is a
+        // simulator demo build (--dart-define=DEMO_MANUAL_STEPS=true): a
+        // simulator has no motion sensor, so a demo video adds steps by hand.
+        includeManualEntry: const bool.fromEnvironment('DEMO_MANUAL_STEPS'),
       );
       // iOS: no samples (or reading not allowed) is 0. Android: null when
       // the read was refused.
