@@ -318,13 +318,17 @@ class ChainService {
     );
   }
 
-  /// Pays the deposit: approves it if needed, then `join()`.
+  /// Pays the deposit: approves it if needed, then `join()`. [onApproved]
+  /// is called once the approval is on chain (or was not needed), right
+  /// before the join is sent, so a screen can show which step is running.
   Future<String> join(
     EthPrivateKey key,
     String launcher,
-    BigInt deposit,
-  ) async {
+    BigInt deposit, {
+    void Function()? onApproved,
+  }) async {
     await _approve(key, launcher, deposit);
+    onApproved?.call();
     return _send(
       key,
       _launcher(launcher),
@@ -409,7 +413,9 @@ class ChainService {
 
   /// Starts a round: Portal.newLauncher with our CheckInLauncherFactory,
   /// paying the Portal's salt lock fee in tBNB. Returns the launcher address,
-  /// read from the factory's CheckInLauncherCreated event.
+  /// read from the factory's CheckInLauncherCreated event. [onMined] is
+  /// called once the launch address ending in 7777 has been found, right
+  /// before the transaction is sent.
   Future<String> createRound(
     EthPrivateKey key, {
     required String name,
@@ -418,6 +424,7 @@ class ChainService {
     required int liquidityBps,
     required int checkInGoal,
     required DateTime deadline,
+    void Function()? onMined,
   }) async {
     if (!AppConfig.canStartRound) {
       throw Exception('This build cannot start a round yet.');
@@ -429,6 +436,7 @@ class ChainService {
       List.generate(32, (_) => random.nextInt(256)),
     );
     final salt = await mineSaltAsync(seed);
+    onMined?.call();
     final receipt = await _sendForReceipt(
       key,
       portal,

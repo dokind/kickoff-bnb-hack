@@ -11,6 +11,7 @@ import '../theme/tokens.dart';
 import '../util/format.dart';
 import '../widgets/common.dart';
 import '../widgets/dot_matrix.dart';
+import '../widgets/how_it_works.dart';
 import '../widgets/identicon.dart';
 import '../widgets/launch_floor_line.dart';
 import '../widgets/main_tabs.dart';
@@ -21,6 +22,7 @@ import '../widgets/streak_block.dart';
 import 'checkin_sheet.dart';
 import 'invite_sheet.dart';
 import 'join_sheet.dart';
+import 'round_screen.dart';
 import 'sponsor_sheet.dart';
 
 /// Home, the one screen. At the top: the rounds, one card each, swiped
@@ -129,6 +131,30 @@ class _HomeScreenState extends State<HomeScreen> {
     GoRouter.maybeOf(context)?.go('/result');
   }
 
+  /// Opens Your round of [round] over Home. Null without a router.
+  VoidCallback? _toRound(Round round) {
+    final router = GoRouter.maybeOf(context);
+    return router == null
+        ? null
+        : () => router.push(RoundScreen.path(round.id));
+  }
+
+  /// After a paid deposit: a short "You're in" and Your round, its Check in
+  /// ready.
+  VoidCallback? _joined(Round round) {
+    final go = _toRound(round);
+    return go == null
+        ? null
+        : () {
+            showMessage(
+              context,
+              'You\'re in. Check in today to start your share.',
+              kind: BannerKind.success,
+            );
+            go();
+          };
+  }
+
   /// The first touch on Home (a finger, a mouse button, a wheel or a
   /// trackpad scroll): from now until the app is opened again the cards
   /// never move by themselves.
@@ -235,6 +261,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           now: _state.now,
                           onSelect: _select,
                           onInvite: (r) => showInviteSheet(context, _state, r),
+                          onOpen: GoRouter.maybeOf(context) == null
+                              ? null
+                              : (r) => _toRound(r)?.call(),
                           canAdvance: _canAdvance,
                           autoAdvance: _state.autoAdvance,
                         ),
@@ -246,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             round: round,
                             onInvite: () =>
                                 showInviteSheet(context, _state, round),
+                            onOpenYou: _toRound(round),
                           ),
                         ),
                         inset(LaunchFloorLine(state: _state, round: round)),
@@ -255,7 +285,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         inset(_PrizeCard(state: _state, round: round)),
                         const SizedBox(height: Space.s6),
                         inset(
-                          _HowItWorks(
+                          HowItWorks(
                             key: const Key('how-it-works'),
                             state: _state,
                             round: round,
@@ -335,10 +365,14 @@ class _HomeScreenState extends State<HomeScreen> {
     // A long name is cut short inside the label; the words around it stay.
     final name = round.name.trim().isEmpty ? 'this round' : round.name.trim();
 
+    // A launch or a refund in flight shows its steps in place of the hint.
+    final run = _busy ? _state.steps : null;
     Widget hint(String text) => Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: _error != null
           ? ErrorLine(_error!)
+          : run != null && run.launcher == round.id
+          ? RunProgress(steps: run.steps, current: run.current)
           : Text(
               text,
               textAlign: TextAlign.center,
@@ -358,7 +392,8 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Join $name · ${formatMoney(_state.deposit, usd)}',
             shrink: name,
             key: key,
-            onPressed: () => showJoinSheet(context, _state, round),
+            onPressed: () =>
+                showJoinSheet(context, _state, round, onJoined: _joined(round)),
           ),
         ];
       case HomeStage.checkIn:
@@ -375,7 +410,8 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Check in · $name',
             shrink: name,
             key: key,
-            onPressed: () => showCheckInSheet(context, _state, round),
+            onPressed: () =>
+                showCheckInSheet(context, _state, round, then: _toRound(round)),
           ),
         ];
       case HomeStage.checkedIn:
@@ -636,18 +672,9 @@ class _NoRound extends StatelessWidget {
           ],
         ),
       ),
-      _ => GlassCard(
-        child: Row(
-          children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2, color: c.text),
-            ),
-            const SizedBox(width: Space.s3),
-            Text('Reading the round…', style: t.body(15)),
-          ],
-        ),
+      _ => const LoadingCard(
+        key: Key('home-loading'),
+        label: 'Reading the round…',
       ),
     };
   }
@@ -741,77 +768,6 @@ class _PrizeCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// The rules of the round in six lines, with what the server can and cannot
-/// do said plainly.
-class _HowItWorks extends StatelessWidget {
-  const _HowItWorks({super.key, required this.state, required this.round});
-  final AppState state;
-  final Round round;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SectionHeader('How it works'),
-        const SizedBox(height: 14),
-        GlassCard(
-          padding: EdgeInsets.zero,
-          child: Column(
-            children: [
-              IconRow(
-                icon: Icons.payments_outlined,
-                text:
-                    'The deposit is ${formatTestUsd(state.deposit)}, paid '
-                    'once: ${formatBps(10000 - round.liquidityBps)} to the '
-                    'prize, ${formatBps(round.liquidityBps)} to the token '
-                    'pool.',
-              ),
-              IconRow(
-                icon: Icons.directions_walk_rounded,
-                text:
-                    'Check in on any day you take at least '
-                    '${formatCount(round.minSteps)} steps. One per day, '
-                    'counted in UTC.',
-              ),
-              IconRow(
-                icon: Icons.rocket_launch_outlined,
-                text:
-                    'Launch needs both: '
-                    '${formatCount(round.checkInGoal)} check-ins and '
-                    '${formatCount(AppConfig.launchPoolFloor)} $testUsd in '
-                    'the token pool. Then anyone can launch it on Flap.',
-              ),
-              const IconRow(
-                icon: Icons.pie_chart_outline_rounded,
-                text:
-                    'The prize, half of the token supply and 80% of the '
-                    'trading tax are shared by how many days each member '
-                    'showed up.',
-              ),
-              IconRow(
-                icon: Icons.undo_rounded,
-                text:
-                    'If the token has not launched by '
-                    '${formatDate(round.deadline)}, every deposit goes back '
-                    'in full.',
-              ),
-              const IconRow(
-                icon: Icons.verified_user_outlined,
-                text:
-                    'Check-ins are attested by ${AppConfig.productName}\'s '
-                    'server, not proven. The server cannot launch early, '
-                    'block a launch or move funds.',
-                last: true,
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

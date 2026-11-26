@@ -646,9 +646,20 @@ class _NewRoundScreenState extends State<NewRoundScreen> {
     // With the keyboard up the bar is the button alone, so the form keeps
     // the room there is.
     final typing = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final run = _busy ? _state.stepsFor(StepAction.start) : null;
     return [
       if (_error != null) ...[
         ErrorLine(_error!),
+        const SizedBox(height: Space.s3),
+      ],
+      // Finding the address takes a few seconds: the steps say which one is
+      // running, from what the state is really doing.
+      if (run != null) ...[
+        RunProgress(
+          key: const Key('start-progress'),
+          steps: run.steps,
+          current: run.current,
+        ),
         const SizedBox(height: Space.s3),
       ],
       PillButton(

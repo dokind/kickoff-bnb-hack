@@ -157,6 +157,7 @@ class SlowChain extends FakeChain {
     required int liquidityBps,
     required int checkInGoal,
     required DateTime deadline,
+    void Function()? onMined,
   }) async {
     await holdCreate?.future;
     return super.createRound(
@@ -167,6 +168,7 @@ class SlowChain extends FakeChain {
       liquidityBps: liquidityBps,
       checkInGoal: checkInGoal,
       deadline: deadline,
+      onMined: onMined,
     );
   }
 }
@@ -222,41 +224,46 @@ void main() {
       );
     });
 
-    testWidgets('step 1 mints the deposit, step 2 approves and joins', (
+    testWidgets('one press mints, approves and joins, step by step', (
       tester,
     ) async {
-      final chain = FakeChain();
+      final gate = Completer<void>();
+      final chain = FakeChain()..joinGate = gate.future;
       final state = await makeState(chain: chain);
       await pumpBody(tester, JoinSheet(state: state, round: state.round!));
 
-      // Step 1: the wallet mints the deposit amount to itself.
-      expect(button('Get test dollars'), findsOneWidget);
-      expect(find.byIcon(Icons.check_rounded), findsNothing);
-      await tester.tap(button('Get test dollars'));
-      await settle(tester);
-      expect(chain.calls, ['mint 1000']);
-      await tester.scrollUntilVisible(
-        find.text('Pay deposit'),
-        100,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(
-        find.byIcon(Icons.check_rounded),
-        findsOneWidget,
-        reason: 'step 1',
-      );
-      expect(
-        find.text('1,000 test USD'),
-        findsNWidgets(2),
-        reason: 'the balance',
-      );
-
-      // Step 2: pay it into the round.
+      // One button does every step: the wallet holds no test USD yet.
       expect(button('Get test dollars'), findsNothing);
-      await tester.tap(button('Pay deposit · 1,000 test USD'));
+      expect(button('Join with test dollars · 1,000 test USD'), findsOneWidget);
+      expect(find.byIcon(Icons.check_rounded), findsNothing);
+      await tester.tap(button('Join with test dollars · 1,000 test USD'));
+      await settle(tester);
+
+      // The dollars are minted and approved; the join is on its way. The
+      // steps say so, from what the state really did.
+      expect(chain.calls, ['mint 1000']);
+      expect(find.byKey(const Key('join-progress')), findsOneWidget);
+      expect(find.text('Step 3 of 3'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('join-progress')),
+          matching: find.text('Pay the deposit'),
+        ),
+        findsOneWidget,
+      );
+      expect(state.steps!.steps, [
+        'Get test dollars',
+        'Approve test USD',
+        'Pay the deposit',
+      ]);
+      expect(find.text('Joining…'), findsOneWidget);
+
+      gate.complete();
       await settle(tester);
       expect(chain.calls, ['mint 1000', 'join 1000']);
+      expect(state.steps, isNull);
       expect(state.isMember, isTrue);
+      expect(state.joinTxOf(launcher), '0xj1');
       expect(find.text('YOU\'RE IN.'), findsOneWidget);
       // The round is open: today's check-in is the way on, or later.
       expect(button('Check in now'), findsOneWidget);
@@ -293,20 +300,23 @@ void main() {
       await state.refresh();
       await pumpBody(tester, JoinSheet(state: state, round: state.round!));
 
-      await tester.tap(button('Get test dollars'));
+      await tester.tap(button('Join with test dollars · 1,000 test USD'));
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.textContaining('Preparing your wallet:'), findsOneWidget);
       expect(find.text('Preparing your wallet…'), findsOneWidget);
+      // The wallet had no fees: that is the first of four steps.
+      expect(find.text('Step 1 of 4'), findsOneWidget);
+      expect(find.text('Prepare your wallet'), findsOneWidget);
       expect(chain.calls, isEmpty, reason: 'nothing is sent without gas');
 
-      // The faucet's transfer arrives.
+      // The faucet's transfer arrives, and the join goes all the way.
       chain.bnb = usd(0.03);
       await tester.pump(const Duration(seconds: 3));
       await settle(tester);
       expect(find.textContaining('Preparing your wallet'), findsNothing);
-      expect(chain.calls, ['mint 1000']);
-      expect(button('Pay deposit · 1,000 test USD'), findsOneWidget);
+      expect(chain.calls, ['mint 1000', 'join 1000']);
+      expect(find.text('YOU\'RE IN.'), findsOneWidget);
     });
 
     testWidgets('a failed step is one sentence and the button says Try again', (
@@ -316,14 +326,17 @@ void main() {
       final state = await makeState(chain: chain);
       await pumpBody(tester, JoinSheet(state: state, round: state.round!));
 
-      await tester.tap(button('Get test dollars'));
+      await tester.tap(button('Join with test dollars · 1,000 test USD'));
       await settle(tester);
       expect(find.text('The mint was rejected. Try again.'), findsOneWidget);
       expect(find.textContaining('Exception'), findsNothing);
+      expect(chain.calls, isEmpty, reason: 'nothing was paid');
+      expect(state.steps, isNull);
+      // "Try again" runs the whole join again, from the step that failed.
       await tester.tap(button('Try again'));
       await settle(tester);
-      expect(chain.calls, ['mint 1000']);
-      expect(button('Pay deposit · 1,000 test USD'), findsOneWidget);
+      expect(chain.calls, ['mint 1000', 'join 1000']);
+      expect(find.text('YOU\'RE IN.'), findsOneWidget);
     });
 
     testWidgets('what can be lost: three plain lines over the pay button', (
@@ -590,7 +603,17 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const Key('steps')), findsOneWidget);
+      // An empty field says what to type and cannot be sent: a number shown
+      // as a placeholder once read as if it were filled in.
+      expect(find.text('Type today\'s steps'), findsOneWidget);
+      await tester.tap(button('Check in'));
+      await settle(tester);
+      expect(server.bodies['/rounds/$launcher/checkin'], isNull);
+      expect(find.text('Type today\'s steps first.'), findsOneWidget);
+      // Typing clears the sentence and the button is "Check in" again.
       await tester.enterText(find.byKey(const Key('steps')), '6214');
+      await tester.pump();
+      expect(find.text('Type today\'s steps first.'), findsNothing);
       await tester.tap(button('Check in'));
       await settle(tester);
 
@@ -1146,13 +1169,26 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(
-        find.descendant(
-          of: row,
-          matching: find.text('Morning Movers, Lumpini Striders'),
-        ),
-        findsOneWidget,
-      );
+      // One row per round, each with its deposit; each opens Your round.
+      for (final (at, name, amount) in [
+        (launcher, 'Morning Movers', '1,000 test USD'),
+        (launcherB, 'Lumpini Striders', '500 test USD'),
+      ]) {
+        final line = find.byKey(Key('wallet-round-$at'));
+        expect(
+          find.descendant(of: row, matching: line),
+          findsOneWidget,
+          reason: name,
+        );
+        expect(
+          find.descendant(of: line, matching: find.text(name)),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: line, matching: find.text(amount)),
+          findsOneWidget,
+        );
+      }
       // Under the balance, inside its card.
       expect(
         find.descendant(of: find.byType(BalanceCard), matching: row),

@@ -354,6 +354,16 @@ class _ResultScreenState extends State<ResultScreen> {
                             ErrorLine(_error!),
                             const SizedBox(height: 10),
                           ],
+                          // The claim's steps, as the state runs them.
+                          if (_busy &&
+                              _state.stepsFor(StepAction.claim) != null) ...[
+                            RunProgress(
+                              key: const Key('claim-progress'),
+                              steps: _state.steps!.steps,
+                              current: _state.steps!.current,
+                            ),
+                            const SizedBox(height: Space.s3),
+                          ],
                           if (_state.hasClaimable || _busy)
                             PillButton(
                               kind: PillKind.volt,

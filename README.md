@@ -17,6 +17,8 @@ Or install the app, which reads today's steps from Apple Health or Health Connec
   phone and allow installing from the browser. It is signed with a throwaway debug key, so a newer
   build may ask you to remove the old one first.
 
+**Whitepaper:** [docs/WHITEPAPER.md](docs/WHITEPAPER.md)
+
 | Home | Start a round | Wallet | Invite |
 |:---:|:---:|:---:|:---:|
 | <img src="docs/img/home.png" width="180" alt="Home: the featured round Demo Day at 4 of 5 check-ins, the prize so far and the check-in button"> | <img src="docs/img/new-round.png" width="180" alt="Start a round: how long it runs and the deal, spelled out before Start round"> | <img src="docs/img/wallet.png" width="180" alt="Wallet: the test USD balance, network fees, Get test dollars and Back up your key"> | <img src="docs/img/invite.png" width="180" alt="Invite: a round's QR code, its link and the unlisted switch"> |

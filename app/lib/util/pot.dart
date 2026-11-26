@@ -52,6 +52,23 @@ String shareNudge(int days, int total) {
       : 'Check in today to grow your share.';
 }
 
+/// What a check-in did to a share, said once it is on chain: "Your share
+/// went from 25% to 40%." Before is [beforeDays] of [beforeTotal], after is
+/// [afterDays] of [afterTotal] (others may have checked in meanwhile, so the
+/// share can also stay or fall, and the sentence says so).
+String shareChangeSentence(
+  int beforeDays,
+  int beforeTotal,
+  int afterDays,
+  int afterTotal,
+) {
+  final before = formatShare(beforeDays, beforeTotal);
+  final after = formatShare(afterDays, afterTotal);
+  return before == after
+      ? 'Your share stays at $after.'
+      : 'Your share went from $before to $after.';
+}
+
 /// The quiet line under a member's share while the bar is not full: the
 /// round cannot launch yet, and every check-in until it does moves the
 /// shares. Null once [total] reaches [goal].

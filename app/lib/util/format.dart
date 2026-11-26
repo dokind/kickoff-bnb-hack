@@ -90,6 +90,29 @@ String formatDate(DateTime d) => '${d.day} ${_months[d.month - 1]} ${d.year}';
 String formatTime(DateTime d) =>
     '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
+const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/// A moment in the phone's own time zone, with its weekday and time:
+/// "Mon 30 Nov, 07:34".
+String formatMoment(DateTime d) {
+  final l = d.toLocal();
+  return '${_weekdays[l.weekday - 1]} ${l.day} ${_months[l.month - 1]}, '
+      '${formatTime(l)}';
+}
+
+/// What is left until a deadline, rounded down: "3 days left", "1 day
+/// left", "5 h left", "40 min left", "under a minute left". Null once it
+/// has passed.
+String? formatTimeLeft(Duration d) {
+  if (d.isNegative || d == Duration.zero) return null;
+  if (d.inDays >= 1) {
+    return d.inDays == 1 ? '1 day left' : '${d.inDays} days left';
+  }
+  if (d.inHours >= 1) return '${d.inHours} h left';
+  if (d.inMinutes >= 1) return '${d.inMinutes} min left';
+  return 'under a minute left';
+}
+
 /// How long until something: "5 h 12 min", "12 min", "under a minute".
 String formatWait(Duration d) {
   if (d.inMinutes < 1) return 'under a minute';

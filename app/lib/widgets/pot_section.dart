@@ -29,6 +29,7 @@ class PotSection extends StatefulWidget {
     required this.state,
     required this.round,
     this.onInvite,
+    this.onOpenYou,
   });
 
   final AppState state;
@@ -38,6 +39,9 @@ class PotSection extends StatefulWidget {
 
   /// "Invite someone", while the round is open.
   final VoidCallback? onInvite;
+
+  /// The "You" row was pressed: Your round, with every number about you.
+  final VoidCallback? onOpenYou;
 
   /// Rows shown before "Show everyone".
   static const top = 5;
@@ -167,7 +171,12 @@ class _PotSectionState extends State<PotSection> {
                               padding: const EdgeInsets.only(left: 60),
                               child: Divider(color: c.hairline),
                             ),
-                    _RowTile(row: row, total: pot.total, phase: phase),
+                    _RowTile(
+                      row: row,
+                      total: pot.total,
+                      phase: phase,
+                      onOpen: row.isYou ? widget.onOpenYou : null,
+                    ),
                   ],
                   if (more > 0 || _everyone)
                     Padding(
@@ -511,10 +520,18 @@ class _Nudge extends StatelessWidget {
 /// friendly one made from the address ("Quiet Otter"); the address beside
 /// it is what tells two wallets apart for sure.
 class _RowTile extends StatelessWidget {
-  const _RowTile({required this.row, required this.total, required this.phase});
+  const _RowTile({
+    required this.row,
+    required this.total,
+    required this.phase,
+    this.onOpen,
+  });
   final PotRow row;
   final int total;
   final _Phase phase;
+
+  /// The "You" row opens Your round.
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -533,109 +550,124 @@ class _RowTile extends StatelessWidget {
       _Phase.open => none ? ', nothing yet' : ', $amount if it launched now',
       _Phase.launched => ', $amount',
     };
+    final open = onOpen;
     return Semantics(
       container: true,
+      button: open != null,
+      onTap: open,
+      hint: open != null ? 'Opens your round' : null,
       label:
           '$name, ${days(row.days)}, ${formatShare(row.days, total)} of all '
           'check-ins$said',
       excludeSemantics: true,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        child: Row(
-          children: [
-            Identicon(address: row.address, size: 30),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 5,
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: row.isYou
-                              ? t
-                                    .body(14, FontWeight.w700)
-                                    .copyWith(color: c.volt)
-                              : t.body(14, FontWeight.w600),
-                        ),
-                      ),
-                      if (amount != null) ...[
-                        const SizedBox(width: Space.s2),
+      child: GestureDetector(
+        key: open != null ? const Key('pot-you-open') : null,
+        behavior: HitTestBehavior.opaque,
+        onTap: open,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          child: Row(
+            children: [
+              Identicon(address: row.address, size: 30),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
                         Expanded(
-                          flex: 4,
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
+                          flex: 5,
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: row.isYou
+                                ? t
+                                      .body(14, FontWeight.w700)
+                                      .copyWith(color: c.volt)
+                                : t.body(14, FontWeight.w600),
+                          ),
+                        ),
+                        if (amount != null) ...[
+                          const SizedBox(width: Space.s2),
+                          Expanded(
+                            flex: 4,
+                            child: Align(
                               alignment: Alignment.centerRight,
-                              child: Text(
-                                amount,
-                                maxLines: 1,
-                                style: none
-                                    ? t.body(13).copyWith(color: c.text2)
-                                    : t
-                                          .body(14, FontWeight.w600)
-                                          .copyWith(
-                                            fontFeatures: const [
-                                              FontFeature.tabularFigures(),
-                                            ],
-                                          ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  amount,
+                                  maxLines: 1,
+                                  style: none
+                                      ? t.body(13).copyWith(color: c.text2)
+                                      : t
+                                            .body(14, FontWeight.w600)
+                                            .copyWith(
+                                              fontFeatures: const [
+                                                FontFeature.tabularFigures(),
+                                              ],
+                                            ),
+                                ),
                               ),
                             ),
                           ),
+                        ],
+                      ],
+                    ),
+                    if (!row.isYou)
+                      Text(
+                        shortAddress(row.address),
+                        maxLines: 1,
+                        style: t.mono.copyWith(
+                          fontSize: 11,
+                          height: 1.3,
+                          color: c.text2,
+                        ),
+                      ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minWidth: MediaQuery.textScalerOf(
+                              context,
+                            ).scale(50),
+                          ),
+                          child: Text(
+                            days(row.days),
+                            maxLines: 1,
+                            style: t
+                                .body(12)
+                                .copyWith(
+                                  height: 1.1,
+                                  color: c.text2,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ShareTicks(
+                            fraction: row.fraction,
+                            accent: row.isYou,
+                          ),
                         ),
                       ],
-                    ],
-                  ),
-                  if (!row.isYou)
-                    Text(
-                      shortAddress(row.address),
-                      maxLines: 1,
-                      style: t.mono.copyWith(
-                        fontSize: 11,
-                        height: 1.3,
-                        color: c.text2,
-                      ),
                     ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minWidth: MediaQuery.textScalerOf(context).scale(50),
-                        ),
-                        child: Text(
-                          days(row.days),
-                          maxLines: 1,
-                          style: t
-                              .body(12)
-                              .copyWith(
-                                height: 1.1,
-                                color: c.text2,
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures(),
-                                ],
-                              ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ShareTicks(
-                          fraction: row.fraction,
-                          accent: row.isYou,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              if (open != null) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right_rounded, size: 20, color: c.volt),
+              ],
+            ],
+          ),
         ),
       ),
     );

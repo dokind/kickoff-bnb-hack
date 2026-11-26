@@ -9,6 +9,8 @@ import 'screens/home_screen.dart';
 import 'screens/new_round_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/result_screen.dart';
+import 'screens/round_screen.dart';
+import 'util/format.dart';
 
 /// Routes. The first two are the places in the floating tab bar; the "+"
 /// between them opens the "Add a round" sheet, which is not a route.
@@ -20,6 +22,12 @@ import 'screens/result_screen.dart';
 ///                over the place the person was on.
 ///   /onboarding  two first-run steps (shown once, before anything else)
 ///   /result      after the launch: the token, your days, your share, Claim
+///   `/round/<launcher>`  Your round: what you get, your money, how it ends,
+///                your week, and the one next step. Pushed over Home (or
+///                Wallet), so back returns there; opened alone from a web
+///                link (`/#/round/<launcher>`), back leads Home. A first-time
+///                visitor goes through onboarding first and lands on Home
+///                with that round selected.
 ///   `/r/<launcher>`  a round's link: Home, with that round selected (listed or
 ///                not). A first-time visitor goes through onboarding first
 ///                and lands on the round after it.
@@ -36,6 +44,16 @@ GoRouter buildRouter(AppState state, {String? initialLocation}) => GoRouter(
       final launcher = AppConfig.launcherFromLink(s.uri.path);
       if (launcher != null) scheduleMicrotask(() => state.openLink(launcher));
       return state.onboarded ? '/' : '/onboarding';
+    }
+    // Your round's link: the round is looked for by the screen itself.
+    if (s.uri.path.startsWith('/round/')) {
+      final launcher = s.uri.pathSegments.length == 2
+          ? s.uri.pathSegments[1]
+          : '';
+      if (!isAddress(launcher)) return '/';
+      if (state.onboarded) return null;
+      scheduleMicrotask(() => state.openLink(launcher));
+      return '/onboarding';
     }
     final onboarding = s.matchedLocation == '/onboarding';
     // First run: everything starts at onboarding.
@@ -71,6 +89,11 @@ GoRouter buildRouter(AppState state, {String? initialLocation}) => GoRouter(
     GoRoute(
       path: '/result',
       builder: (_, _) => ResultScreen(state: state),
+    ),
+    GoRoute(
+      path: '/round/:launcher',
+      builder: (_, s) =>
+          RoundScreen(state: state, launcher: s.pathParameters['launcher']!),
     ),
     // Never built: the redirect above leads on from a round's link.
     GoRoute(

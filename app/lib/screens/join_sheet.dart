@@ -10,18 +10,27 @@ import '../util/format.dart';
 import '../widgets/common.dart';
 import 'checkin_sheet.dart';
 
-/// Opens the join sheet for [round] over the current screen.
-Future<void> showJoinSheet(BuildContext context, AppState state, Round round) =>
-    showAppSheet<void>(
-      context,
-      builder: (_) => JoinSheet(state: state, round: round),
-    );
+/// Opens the join sheet for [round] over the current screen. With
+/// [onJoined] the sheet closes itself once the deposit is paid and calls it
+/// (Home opens Your round); without, it says "You're in" itself.
+Future<void> showJoinSheet(
+  BuildContext context,
+  AppState state,
+  Round round, {
+  VoidCallback? onJoined,
+}) => showAppSheet<void>(
+  context,
+  builder: (_) => JoinSheet(state: state, round: round, onJoined: onJoined),
+);
 
 /// Joining a round: what the deposit is and where it goes, what can be lost,
-/// then two real steps with their progress.
-///   1. "Get test dollars": the wallet mints the deposit in Flap's free test
-///      USD to itself. On mainnet this step is paying with a stablecoin.
-///   2. "Pay deposit": approve, then `join()`.
+/// then ONE button that does every step ([AppState.joinRound]), with the
+/// step running shown over it ([RunProgress]):
+///   1. "Get test dollars": the wallet mints what it is short of the deposit
+///      in Flap's free test USD. On mainnet this step is paying with a
+///      stablecoin. Left out when the wallet already holds the deposit
+///      (the button then says "Pay deposit").
+///   2. "Approve test USD", then "Pay the deposit": `join()`.
 /// Before the first transaction the sheet waits for the faucet's gas to
 /// arrive and says "Preparing your wallet".
 ///
@@ -37,11 +46,19 @@ Future<void> showJoinSheet(BuildContext context, AppState state, Round round) =>
 /// name is over the title, and the deposit is paid into that round whatever
 /// card is in view on Home behind it.
 class JoinSheet extends StatefulWidget {
-  const JoinSheet({super.key, required this.state, required this.round});
+  const JoinSheet({
+    super.key,
+    required this.state,
+    required this.round,
+    this.onJoined,
+  });
   final AppState state;
 
   /// The round named on the button that opened the sheet.
   final Round round;
+
+  /// Called after the sheet has closed itself on a paid deposit.
+  final VoidCallback? onJoined;
 
   @override
   State<JoinSheet> createState() => _JoinSheetState();
@@ -106,8 +123,8 @@ class _JoinSheetState extends State<JoinSheet> {
     }
   }
 
-  Future<void> _getDollars() => _run(() => _state.getTestDollars(_deposit));
-
+  /// The one press: test dollars when the wallet is short of them, then
+  /// approve and pay.
   Future<void> _pay() async {
     if (_late && !_lateConfirmed) {
       // The first press only arms the button: it now says "Join anyway".
@@ -116,8 +133,15 @@ class _JoinSheetState extends State<JoinSheet> {
     }
     setState(() => _paying = true);
     await _run(() async {
-      await _state.payDeposit(launcher: widget.round.launcher);
-      if (mounted) setState(() => _done = true);
+      await _state.joinRound(launcher: widget.round.launcher);
+      if (!mounted) return;
+      final then = widget.onJoined;
+      if (then != null) {
+        Navigator.of(context).pop();
+        then();
+      } else {
+        setState(() => _done = true);
+      }
     });
     if (mounted) setState(() => _paying = false);
   }
@@ -194,7 +218,16 @@ class _JoinSheetState extends State<JoinSheet> {
     final c = context.colors;
     final round = _round;
     final deposit = _deposit;
-    final hasDollars = _paying || _state.usd >= deposit;
+    final run = _state.stepsFor(StepAction.join, launcher: round.id);
+    final step = run == null ? null : run.steps[run.current];
+    // The dollars are there: in the wallet, or the run is past getting them
+    // (the balance drops again once the deposit is paid).
+    final hasDollars =
+        _state.usd >= deposit ||
+        (run != null &&
+            run.current > run.steps.indexOf(ActionSteps.getDollars) &&
+            run.steps[run.current] != ActionSteps.prepare);
+    final mint = !_paying && _state.usd < deposit;
     final preparing = _busy && _state.funding;
     final toPool =
         deposit * BigInt.from(round.liquidityBps) ~/ BigInt.from(10000);
@@ -274,7 +307,7 @@ class _JoinSheetState extends State<JoinSheet> {
                       'Testnet: free test dollars. On mainnet this step is '
                       'paying with a stablecoin.',
                   done: hasDollars,
-                  active: _busy && !hasDollars && !preparing,
+                  active: step == ActionSteps.getDollars,
                 ),
                 const SizedBox(height: 10),
                 _StepRow(
@@ -284,7 +317,8 @@ class _JoinSheetState extends State<JoinSheet> {
                       'Approves, then pays ${formatTestUsd(deposit)} into '
                       'the round\'s contract.',
                   done: false,
-                  active: _busy && hasDollars && !preparing,
+                  active:
+                      step == ActionSteps.approve || step == ActionSteps.pay,
                 ),
               ],
             ),
@@ -319,33 +353,37 @@ class _JoinSheetState extends State<JoinSheet> {
             const _Preparing(),
             const SizedBox(height: Space.s3),
           ],
+          // The step running now, from what the state is really doing.
+          if (_busy && run != null) ...[
+            RunProgress(
+              key: const Key('join-progress'),
+              steps: run.steps,
+              current: run.current,
+            ),
+            const SizedBox(height: Space.s4),
+          ],
           if (_error != null) ...[
             ErrorLine(_error!),
             const SizedBox(height: Space.s3),
           ],
-          if (!hasDollars)
-            PillButton(
-              label: _error != null ? 'Try again' : 'Get test dollars',
-              icon: _error != null ? Icons.refresh_rounded : Icons.water_drop,
-              busy: _busy,
-              busyLabel: preparing
-                  ? 'Preparing your wallet…'
-                  : 'Getting test dollars…',
-              onPressed: _getDollars,
-            )
-          else
-            PillButton(
-              kind: armed && _error == null ? PillKind.danger : PillKind.volt,
-              label: _error != null
-                  ? 'Try again'
-                  : armed
-                  ? 'Join anyway'
-                  : 'Pay deposit · ${formatTestUsd(deposit)}',
-              icon: _error != null ? Icons.refresh_rounded : Icons.lock_rounded,
-              busy: _busy,
-              busyLabel: preparing ? 'Preparing your wallet…' : 'Confirming…',
-              onPressed: _pay,
-            ),
+          PillButton(
+            kind: armed && _error == null ? PillKind.danger : PillKind.volt,
+            label: _error != null
+                ? 'Try again'
+                : armed
+                ? 'Join anyway'
+                : mint
+                ? 'Join with test dollars · ${formatTestUsd(deposit)}'
+                : 'Pay deposit · ${formatTestUsd(deposit)}',
+            icon: _error != null
+                ? Icons.refresh_rounded
+                : mint
+                ? Icons.bolt_rounded
+                : Icons.lock_rounded,
+            busy: _busy,
+            busyLabel: preparing ? 'Preparing your wallet…' : 'Joining…',
+            onPressed: _pay,
+          ),
         ],
       ),
     );
@@ -501,8 +539,9 @@ class _Preparing extends StatelessWidget {
   );
 }
 
-/// One numbered step of a flow: a number (a tick when [done], a spinner
-/// while [active]), a title and one sentence.
+/// One numbered step of a flow: a number (a tick when [done], ringed in the
+/// accent while [active]), a title and one sentence. The running step's
+/// progress is the [RunProgress] over the button, not a second spinner.
 class _StepRow extends StatelessWidget {
   const _StepRow({
     required this.number,
@@ -524,13 +563,12 @@ class _StepRow extends StatelessWidget {
     final c = context.colors;
     final Widget mark = done
         ? Icon(Icons.check_rounded, size: 18, color: c.onVolt)
-        : active
-        ? SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: c.text),
-          )
-        : Text('$number', style: t.body(14, FontWeight.w600));
+        : Text(
+            '$number',
+            style: t
+                .body(14, FontWeight.w600)
+                .copyWith(color: active ? c.volt : c.text),
+          );
     return Semantics(
       label:
           'Step $number: $title. '
@@ -552,6 +590,7 @@ class _StepRow extends StatelessWidget {
               decoration: BoxDecoration(
                 color: done ? c.volt : Colors.white.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
+                border: active ? Border.all(color: c.volt, width: 2) : null,
               ),
               child: mark,
             ),

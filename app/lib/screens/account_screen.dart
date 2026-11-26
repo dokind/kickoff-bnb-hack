@@ -15,6 +15,7 @@ import '../widgets/identicon.dart';
 import '../widgets/main_tabs.dart';
 import '../widgets/tab_bar.dart';
 import 'health_sheet.dart';
+import 'round_screen.dart';
 
 /// Wallet (`/account`, also `/wallet`): your money and your key, and nothing
 /// else. The balance is the hero. Under it, one list of rows: the address
@@ -346,8 +347,9 @@ List<Round> openRoundsJoined(AppState state) => [
       r,
 ];
 
-/// "In rounds: 1,500 test USD" and the rounds' names: the deposits this
-/// wallet has in open rounds, which are not in the balance above.
+/// "In rounds: 1,500 test USD" and one row per round under it (its name and
+/// its deposit): the deposits this wallet has in open rounds, which are not
+/// in the balance above. Each row opens Your round.
 class _InRounds extends StatelessWidget {
   const _InRounds({required this.state, required this.rounds});
   final AppState state;
@@ -382,10 +384,45 @@ class _InRounds extends StatelessWidget {
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
               ),
-              Text(
-                rounds.map((r) => r.name).join(', '),
-                style: t.body(13).copyWith(color: c.text2),
-              ),
+              for (final r in rounds)
+                // Pressable, like every other control: a screen reader can
+                // open it, and Tab and Enter reach it on the web.
+                Pressable(
+                  key: Key('wallet-round-${r.id}'),
+                  label:
+                      'Your round ${r.name}, '
+                      '${formatTestUsd(state.depositOf(r.id))}',
+                  onPressed: () => RoundScreen.open(context, r.launcher),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(Radii.sm),
+                  ),
+                  ringInset: 0,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: Sizes.touch),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            r.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.body(14, FontWeight.w500),
+                          ),
+                        ),
+                        const SizedBox(width: Space.s2),
+                        Text(
+                          formatTestUsd(state.depositOf(r.id)),
+                          style: t.body(13).copyWith(color: c.text2),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 20,
+                          color: c.volt,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'glass.dart';
+import 'run_loader.dart';
 
 /// What a control is pressed through. A touch, a mouse, the keyboard (Tab
 /// to it, then Enter or Space) and a screen reader all end in [onPressed].
@@ -152,8 +153,9 @@ class _FocusRingPainter extends CustomPainter {
 /// money actions), [glass] is the quiet one, [danger] is glass with red ink.
 enum PillKind { primary, volt, glass, danger }
 
-/// A full-width pill button. While [busy] it shows a spinner beside
-/// [busyLabel] and cannot be pressed. Disabled it fades to 45%. Like every
+/// A full-width pill button. While [busy] it shows the running mark
+/// ([RunLoader.small], in the button's ink) beside [busyLabel] and cannot be
+/// pressed. Disabled it fades to 45%. Like every
 /// control here it is pressed through a [Pressable]: by touch, from the
 /// keyboard and by a screen reader.
 class PillButton extends StatefulWidget {
@@ -251,11 +253,7 @@ class _PillButtonState extends State<PillButton> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (widget.busy) ...[
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: ink),
-          ),
+          RunLoader.small(color: ink),
           const SizedBox(width: 10),
         ] else if (widget.icon != null) ...[
           Icon(widget.icon, size: 18, color: ink),

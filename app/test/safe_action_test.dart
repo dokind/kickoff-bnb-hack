@@ -651,10 +651,7 @@ void main() {
       // The sheet is still about "Demo Day" and its 500.
       expect(namedIn(tester, JoinSheet), 'Demo Day');
       expect(find.text('Pay deposit · 500 test USD'), findsNothing);
-      await tester.tap(action('Get test dollars'));
-      await settle(tester, 14);
-      expect(chain.calls, ['mint 500']);
-      await tester.tap(action('Pay deposit · 500 test USD'));
+      await tester.tap(action('Join with test dollars · 500 test USD'));
       await settle(tester, 14);
 
       expect(chain.asked, [launcher], reason: 'the deposit went to Demo Day');

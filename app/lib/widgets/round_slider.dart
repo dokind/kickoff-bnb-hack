@@ -69,6 +69,7 @@ class RoundSlider extends StatefulWidget {
     required this.now,
     required this.onSelect,
     required this.onInvite,
+    this.onOpen,
     this.canAdvance,
     this.autoAdvance = true,
     this.onStopped,
@@ -87,6 +88,9 @@ class RoundSlider extends StatefulWidget {
   /// themselves.
   final void Function(int index, {required bool byPerson}) onSelect;
   final ValueChanged<Round> onInvite;
+
+  /// A card of a round this wallet is in was pressed: Your round.
+  final ValueChanged<Round>? onOpen;
 
   /// Asked before each move the cards make by themselves.
   final bool Function()? canAdvance;
@@ -345,6 +349,9 @@ class RoundSliderState extends State<RoundSlider> {
       info: info,
       now: widget.now,
       onInvite: () => widget.onInvite(info.round),
+      onOpen: widget.onOpen == null || !info.joined
+          ? null
+          : () => widget.onOpen!(info.round),
     );
 
     if (!_many) {
@@ -444,18 +451,24 @@ class _Dots extends StatelessWidget {
 }
 
 /// One round on glass: its name, where it stands, the bar, the prize so
-/// far, the members, the deadline, and "Invite".
+/// far, the members, the deadline, and "Invite". A round this wallet is in
+/// says so with a "Your round" chip and a chevron, and the whole card opens
+/// Your round ([onOpen]).
 class RoundCard extends StatelessWidget {
   const RoundCard({
     super.key,
     required this.info,
     required this.now,
     required this.onInvite,
+    this.onOpen,
   });
 
   final RoundCardInfo info;
   final DateTime now;
   final VoidCallback onInvite;
+
+  /// Opens Your round. Null for a round this wallet is not in.
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -480,164 +493,209 @@ class RoundCard extends StatelessWidget {
         : '${formatCount(round.memberCount)} members';
     final quiet = t.body(13, FontWeight.w500).copyWith(color: c.text2);
 
+    final open = onOpen;
     return Semantics(
       container: true,
+      button: open != null,
       label:
           '${round.name}. $state. $total of $goal check-ins. $when. '
           '${info.joined ? 'You\'re in. ' : ''}'
           '${round.unlisted ? 'Unlisted. ' : ''}',
-      child: GlassCard(
-        // The top edge is 6 closer than the others: the "Invite" row is a
-        // full touch target, 6 taller above and below the chip it draws.
-        padding: const EdgeInsets.fromLTRB(18, 8, 14, 16),
-        tint: info.joined ? c.volt.withValues(alpha: 0.28) : null,
-        // Never an overflow stripe, however large the text is set.
-        child: SingleChildScrollView(
-          physics: const NeverScrollableScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Overline(
-                      round.featured ? 'Featured round' : 'Round',
+      hint: open != null ? 'Opens your round' : null,
+      onTap: open,
+      child: GestureDetector(
+        key: open != null ? const Key('round-card-open') : null,
+        behavior: HitTestBehavior.opaque,
+        onTap: open,
+        child: GlassCard(
+          // The top edge is 6 closer than the others: the "Invite" row is a
+          // full touch target, 6 taller above and below the chip it draws.
+          padding: const EdgeInsets.fromLTRB(18, 8, 14, 16),
+          tint: info.joined ? c.volt.withValues(alpha: 0.28) : null,
+          // Never an overflow stripe, however large the text is set.
+          child: SingleChildScrollView(
+            physics: const NeverScrollableScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Overline(
+                        round.featured ? 'Featured round' : 'Round',
+                      ),
                     ),
-                  ),
-                  Semantics(
-                    button: true,
-                    label: 'Invite to ${round.name}',
-                    excludeSemantics: true,
-                    child: GestureDetector(
-                      key: const Key('round-invite'),
-                      behavior: HitTestBehavior.opaque,
-                      onTap: onInvite,
-                      // A 32-high chip in a touch target of [Sizes.touch].
-                      child: const SizedBox(
-                        height: Sizes.touch,
-                        child: Center(
-                          child: AppChip(
-                            text: 'Invite',
-                            icon: Icons.ios_share_rounded,
-                            height: 32,
+                    Semantics(
+                      button: true,
+                      label: 'Invite to ${round.name}',
+                      excludeSemantics: true,
+                      child: GestureDetector(
+                        key: const Key('round-invite'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: onInvite,
+                        // A 32-high chip in a touch target of [Sizes.touch].
+                        child: const SizedBox(
+                          height: Sizes.touch,
+                          child: Center(
+                            child: AppChip(
+                              text: 'Invite',
+                              icon: Icons.ios_share_rounded,
+                              height: 32,
+                            ),
                           ),
                         ),
                       ),
                     ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Text(
+                    round.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.title(28),
                   ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Text(
-                  round.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: t.title(28),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Flexible(
-                    flex: 3,
-                    child: StatusBadge(text: state, color: colour),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Flexible(
+                      flex: 3,
+                      child: StatusBadge(text: state, color: colour),
+                    ),
+                    if (info.joined) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        flex: 5,
+                        child: open == null
+                            ? const AppChip(
+                                text: 'You\'re in',
+                                icon: Icons.check_rounded,
+                                height: 28,
+                              )
+                            : const _YourRoundChip(),
+                      ),
+                    ],
+                    if (round.unlisted) ...[
+                      const SizedBox(width: 6),
+                      const Flexible(
+                        flex: 4,
+                        child: AppChip(
+                          text: 'Unlisted',
+                          icon: Icons.link_rounded,
+                          height: 28,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Overline('The bar'),
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: TickGauge(
+                    progress: info.progress,
+                    height: 20,
+                    label: '$total of $goal check-ins',
                   ),
-                  if (info.joined) ...[
-                    const SizedBox(width: 6),
-                    const Flexible(
-                      flex: 4,
-                      child: AppChip(
-                        text: 'You\'re in',
-                        icon: Icons.check_rounded,
-                        height: 28,
-                      ),
-                    ),
-                  ],
-                  if (round.unlisted) ...[
-                    const SizedBox(width: 6),
-                    const Flexible(
-                      flex: 4,
-                      child: AppChip(
-                        text: 'Unlisted',
-                        icon: Icons.link_rounded,
-                        height: 28,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 10),
-              const Overline('The bar'),
-              const SizedBox(height: 6),
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: TickGauge(
-                  progress: info.progress,
-                  height: 20,
-                  label: '$total of $goal check-ins',
                 ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '$total / $goal check-ins',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t
-                            .body(13, FontWeight.w600)
-                            .copyWith(
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '$total / $goal check-ins',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t
+                              .body(13, FontWeight.w600)
+                              .copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: Space.s2),
-                    Flexible(
-                      child: Text(
-                        when,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: quiet,
+                      const SizedBox(width: Space.s2),
+                      Flexible(
+                        child: Text(
+                          when,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: quiet,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Prize so far '
-                        '${formatMoney(round.prizeNow, AppConfig.quoteSymbol, maxFraction: 0)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: quiet.copyWith(color: c.text),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Prize so far '
+                          '${formatMoney(round.prizeNow, AppConfig.quoteSymbol, maxFraction: 0)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: quiet.copyWith(color: c.text),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: Space.s2),
-                    Flexible(
-                      child: Text(
-                        members,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: quiet,
+                      const SizedBox(width: Space.s2),
+                      Flexible(
+                        child: Text(
+                          members,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: quiet,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "You're in · Your round" with a chevron: the round card opens Your
+/// round.
+class _YourRoundChip extends StatelessWidget {
+  const _YourRoundChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.only(left: 10, right: 4),
+      decoration: ShapeDecoration(color: c.volt, shape: const StadiumBorder()),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.check_rounded, size: 14, color: c.onVolt),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              'You\'re in · Your round',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.type
+                  .body(12, FontWeight.w700)
+                  .copyWith(color: c.onVolt, height: 1),
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, size: 18, color: c.onVolt),
+        ],
       ),
     );
   }

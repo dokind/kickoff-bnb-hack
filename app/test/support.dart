@@ -110,6 +110,10 @@ class FakeChain extends ChainService {
   num claimedTokens = 0;
   num claimedQuote = 0;
 
+  /// The join waits for this after its approval (a test reads the steps
+  /// meanwhile).
+  Future<void>? joinGate;
+
   /// The name of a write that should fail once ("mint", "join", ...).
   String? fail;
 
@@ -189,13 +193,21 @@ class FakeChain extends ChainService {
   }
 
   @override
-  Future<String> join(EthPrivateKey key, String launcher, BigInt amount) async {
+  Future<String> join(
+    EthPrivateKey key,
+    String launcher,
+    BigInt amount, {
+    void Function()? onApproved,
+  }) async {
     asked.add(launcher.toLowerCase());
     final other = _at(launcher);
     if (!identical(other, this)) {
       dollars -= amount;
-      return other.join(key, launcher, amount);
+      return other.join(key, launcher, amount, onApproved: onApproved);
     }
+    // The approval goes first, as on chain.
+    onApproved?.call();
+    await joinGate;
     _write('join', formatUnits(amount));
     dollars -= amount;
     isMember = true;
@@ -273,7 +285,9 @@ class FakeChain extends ChainService {
     required int liquidityBps,
     required int checkInGoal,
     required DateTime deadline,
+    void Function()? onMined,
   }) async {
+    onMined?.call();
     _write(
       'createRound',
       '$name $symbol ${formatUnits(deposit)} $liquidityBps $checkInGoal',

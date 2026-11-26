@@ -50,6 +50,47 @@ enum HomeStage {
   ended,
 }
 
+/// The actions that take several transactions or waits, each shown with
+/// its steps ([RunProgress]).
+enum StepAction { join, start, launch, claim, refund }
+
+/// Where a multi-step action is right now: its steps, in the words the
+/// screen shows, and the one running. [AppState] moves [current] on only
+/// when that step has really begun (a transaction mined, an answer read),
+/// never on a timer.
+class ActionSteps {
+  const ActionSteps({
+    required this.action,
+    required this.launcher,
+    required this.steps,
+    this.current = 0,
+  });
+
+  final StepAction action;
+
+  /// The round it is for, in lower case. Null while a round is started.
+  final String? launcher;
+  final List<String> steps;
+
+  /// The step running now, from 0.
+  final int current;
+
+  ActionSteps at(int i) =>
+      ActionSteps(action: action, launcher: launcher, steps: steps, current: i);
+
+  static const prepare = 'Prepare your wallet';
+  static const getDollars = 'Get test dollars';
+  static const approve = 'Approve test USD';
+  static const pay = 'Pay the deposit';
+  static const findAddress = 'Find the launch address';
+  static const send = 'Start the round on chain';
+  static const launchOnFlap = 'Launch on Flap';
+  static const readResult = 'Read the result';
+  static const claimVault = 'Claim from the vault';
+  static const takeBack = 'Take your deposit back';
+  static const updateBalance = 'Update your balance';
+}
+
 /// A round this device knows beyond the public list: opened by its link, or
 /// started here. Kept on the device so it stays on Home's slider.
 class KnownRound {
@@ -164,6 +205,58 @@ class AppState extends ChangeNotifier {
 
   /// True while the wallet waits for the faucet's test BNB.
   bool funding = false;
+
+  /// The multi-step action running now, and its step. Null when none is.
+  ActionSteps? steps;
+
+  /// [steps] when they are for [action] (and for [launcher], when given).
+  ActionSteps? stepsFor(StepAction action, {String? launcher}) {
+    final s = steps;
+    if (s == null || s.action != action) return null;
+    if (launcher != null && s.launcher != launcher.toLowerCase()) return null;
+    return s;
+  }
+
+  /// The join transaction of each round this wallet joined on this device
+  /// since the app opened, by launcher in lower case.
+  final _joinTx = <String, String>{};
+
+  /// The transaction that paid this wallet's deposit into [launcher], when
+  /// this device sent it since the app opened.
+  String? joinTxOf(String launcher) => _joinTx[launcher.toLowerCase()];
+
+  /// "Prepare your wallet" leads the steps only when the wallet, as last
+  /// read, has less than [need] for fees.
+  List<String> _gasStep(BigInt need) =>
+      bnb < need ? const [ActionSteps.prepare] : const [];
+
+  /// Runs [body] with [names] as its steps, the first one running.
+  Future<T> _withSteps<T>(
+    StepAction action,
+    String? launcher,
+    List<String> names,
+    Future<T> Function() body,
+  ) async {
+    steps = ActionSteps(action: action, launcher: launcher, steps: names);
+    notifyListeners();
+    try {
+      return await body();
+    } finally {
+      steps = null;
+      notifyListeners();
+    }
+  }
+
+  /// The step called [name] has begun. Steps only move forward, and a step
+  /// that is not in the list (not needed this time) changes nothing.
+  void _reach(String name) {
+    final s = steps;
+    if (s == null) return;
+    final i = s.steps.indexOf(name);
+    if (i <= s.current) return;
+    steps = s.at(i);
+    notifyListeners();
+  }
 
   /// Every round on Home's slider, in its order: the server's featured
   /// round, then the rounds this wallet has joined, then open rounds by
@@ -1041,8 +1134,47 @@ class AppState extends ChangeNotifier {
     final amount = depositOf(r.id);
     await ensureGas(AppConfig.smallGasWei);
     final tx = await chain.join(key!, r.launcher, amount);
+    _joinTx[r.id] = tx;
     await _refreshAfter(r.id);
     return tx;
+  }
+
+  /// Joining in one press: gets the test dollars the wallet is short of the
+  /// deposit (testnet only), approves them and pays the deposit, with
+  /// [steps] following along: "Get test dollars" (only when the wallet does
+  /// not hold the deposit), "Approve test USD", "Pay the deposit", led by
+  /// "Prepare your wallet" when it has no fees yet.
+  Future<String> joinRound({String? launcher}) {
+    final r = _acting(launcher);
+    final amount = depositOf(r.id);
+    return _withSteps(
+      StepAction.join,
+      r.id,
+      [
+        ..._gasStep(AppConfig.smallGasWei),
+        if (usd < amount) ActionSteps.getDollars,
+        ActionSteps.approve,
+        ActionSteps.pay,
+      ],
+      () async {
+        await ensureGas(AppConfig.smallGasWei);
+        if (usd < amount) {
+          _reach(ActionSteps.getDollars);
+          await chain.mintTestDollars(key!, amount - usd);
+          await refreshBalances();
+        }
+        _reach(ActionSteps.approve);
+        final tx = await chain.join(
+          key!,
+          r.launcher,
+          amount,
+          onApproved: () => _reach(ActionSteps.pay),
+        );
+        _joinTx[r.id] = tx;
+        await _refreshAfter(r.id);
+        return tx;
+      },
+    );
   }
 
   /// Adds [amount] to the token pool. Mints the test USD first when the
@@ -1106,17 +1238,30 @@ class AppState extends ChangeNotifier {
   }
 
   /// Launches the token through Flap. Open to anyone once the bar is full.
-  Future<String> launch({String? launcher}) async {
+  Future<String> launch({String? launcher}) {
     final r = _acting(launcher);
-    await ensureGas(
-      AppConfig.launchGasWei,
-      shortMessage:
-          'Launching needs about 0.008 test BNB for network fees and this '
-          'wallet has less. Anyone else in the round can launch.',
+    return _withSteps(
+      StepAction.launch,
+      r.id,
+      [
+        ..._gasStep(AppConfig.launchGasWei),
+        ActionSteps.launchOnFlap,
+        ActionSteps.readResult,
+      ],
+      () async {
+        await ensureGas(
+          AppConfig.launchGasWei,
+          shortMessage:
+              'Launching needs about 0.008 test BNB for network fees and this '
+              'wallet has less. Anyone else in the round can launch.',
+        );
+        _reach(ActionSteps.launchOnFlap);
+        final tx = await chain.launch(key!, r.launcher);
+        _reach(ActionSteps.readResult);
+        await _refreshAfter(r.id);
+        return tx;
+      },
     );
-    final tx = await chain.launch(key!, r.launcher);
-    await _refreshAfter(r.id);
-    return tx;
   }
 
   /// Takes this wallet's share out of the vault.
@@ -1126,20 +1271,55 @@ class AppState extends ChangeNotifier {
     if (vault == null) {
       throw Exception('The vault is not ready yet. Try again in a moment.');
     }
-    await ensureGas(AppConfig.smallGasWei);
-    final tx = await chain.claim(key!, vault);
-    await _refreshAfter(r.id);
-    return tx;
+    return _withSteps(
+      StepAction.claim,
+      r.id,
+      [
+        ..._gasStep(AppConfig.smallGasWei),
+        ActionSteps.claimVault,
+        ActionSteps.updateBalance,
+      ],
+      () async {
+        await ensureGas(AppConfig.smallGasWei);
+        _reach(ActionSteps.claimVault);
+        final tx = await chain.claim(key!, vault);
+        _reach(ActionSteps.updateBalance);
+        await _refreshAfter(r.id);
+        return tx;
+      },
+    );
   }
 
   /// After a missed deadline: takes the deposit back.
-  Future<String> refund({String? launcher}) async {
+  Future<String> refund({String? launcher}) {
     final r = _acting(launcher);
-    await ensureGas(AppConfig.smallGasWei);
-    final tx = await chain.refund(key!, r.launcher);
-    await _refreshAfter(r.id);
-    return tx;
+    return _withSteps(
+      StepAction.refund,
+      r.id,
+      [
+        ..._gasStep(AppConfig.smallGasWei),
+        ActionSteps.takeBack,
+        ActionSteps.updateBalance,
+      ],
+      () async {
+        await ensureGas(AppConfig.smallGasWei);
+        _reach(ActionSteps.takeBack);
+        final tx = await chain.refund(key!, r.launcher);
+        _refunded.add(r.id);
+        _reach(ActionSteps.updateBalance);
+        await _refreshAfter(r.id);
+        return tx;
+      },
+    );
   }
+
+  /// Rounds whose deposit this wallet took back on this device since the
+  /// app opened.
+  final _refunded = <String>{};
+
+  /// This wallet took its deposit back from [launcher] on this device.
+  bool refundedFrom(String launcher) =>
+      _refunded.contains(launcher.toLowerCase());
 
   /// "Start round" on the new-round screen. The new round goes on this
   /// device's slider at once and is selected; then the server is told whether it is
@@ -1154,64 +1334,75 @@ class AppState extends ChangeNotifier {
     required int checkInGoal,
     required DateTime deadline,
     bool unlisted = false,
-  }) async {
-    await ensureGas(
-      AppConfig.startRoundGasWei,
-      // The faucet fills a wallet once, so waiting does not help here: the
-      // sentence says where more comes from.
-      shortMessage:
-          'Starting a round needs about 0.007 test BNB in fees and this '
-          'wallet has less. Send test BNB to your address (Wallet, then '
-          'Address), then try again.',
-    );
-    final launcher = await chain.createRound(
-      key!,
-      name: name,
-      symbol: symbolFor(name),
-      deposit: deposit,
-      liquidityBps: liquidityBps,
-      checkInGoal: checkInGoal,
-      deadline: deadline,
-    );
-    // On the slider at once, from what was just sent to the chain.
-    final created = Round(
-      launcher: launcher,
-      name: name,
-      deposit: deposit,
-      liquidityBps: liquidityBps,
-      checkInGoal: checkInGoal,
-      totalCheckIns: 0,
-      memberCount: 0,
-      totalDeposits: BigInt.zero,
-      totalSponsored: BigInt.zero,
-      poolQuoteNow: BigInt.zero,
-      prizeNow: BigInt.zero,
-      deadline: deadline,
-      launched: false,
-      minSteps: round?.minSteps ?? 1000,
-      unlisted: unlisted,
-    );
-    final id = created.id;
-    _known[id] = KnownRound(
-      launcher: id,
-      creator: address.toLowerCase(),
-      unlisted: unlisted,
-      registered: false,
-      cached: created.toJson(),
-    );
-    rounds = _ordered([...rounds.where((r) => r.id != id), created]);
-    noRound = false;
-    selected = id;
-    _remembered = id;
-    await _saveRounds();
-    notifyListeners();
-    try {
-      await registerRound(id, unlisted: unlisted);
-    } catch (_) {
-      // Kept on the device; [refresh] asks again.
-    }
-    await refreshBalances();
-    unawaited(refresh());
-    return launcher;
-  }
+  }) => _withSteps(
+    StepAction.start,
+    null,
+    [
+      ..._gasStep(AppConfig.startRoundGasWei),
+      ActionSteps.findAddress,
+      ActionSteps.send,
+    ],
+    () async {
+      await ensureGas(
+        AppConfig.startRoundGasWei,
+        // The faucet fills a wallet once, so waiting does not help here: the
+        // sentence says where more comes from.
+        shortMessage:
+            'Starting a round needs about 0.007 test BNB in fees and this '
+            'wallet has less. Send test BNB to your address (Wallet, then '
+            'Address), then try again.',
+      );
+      _reach(ActionSteps.findAddress);
+      final launcher = await chain.createRound(
+        key!,
+        name: name,
+        symbol: symbolFor(name),
+        deposit: deposit,
+        liquidityBps: liquidityBps,
+        checkInGoal: checkInGoal,
+        deadline: deadline,
+        onMined: () => _reach(ActionSteps.send),
+      );
+      // On the slider at once, from what was just sent to the chain.
+      final created = Round(
+        launcher: launcher,
+        name: name,
+        deposit: deposit,
+        liquidityBps: liquidityBps,
+        checkInGoal: checkInGoal,
+        totalCheckIns: 0,
+        memberCount: 0,
+        totalDeposits: BigInt.zero,
+        totalSponsored: BigInt.zero,
+        poolQuoteNow: BigInt.zero,
+        prizeNow: BigInt.zero,
+        deadline: deadline,
+        launched: false,
+        minSteps: round?.minSteps ?? 1000,
+        unlisted: unlisted,
+      );
+      final id = created.id;
+      _known[id] = KnownRound(
+        launcher: id,
+        creator: address.toLowerCase(),
+        unlisted: unlisted,
+        registered: false,
+        cached: created.toJson(),
+      );
+      rounds = _ordered([...rounds.where((r) => r.id != id), created]);
+      noRound = false;
+      selected = id;
+      _remembered = id;
+      await _saveRounds();
+      notifyListeners();
+      try {
+        await registerRound(id, unlisted: unlisted);
+      } catch (_) {
+        // Kept on the device; [refresh] asks again.
+      }
+      await refreshBalances();
+      unawaited(refresh());
+      return launcher;
+    },
+  );
 }

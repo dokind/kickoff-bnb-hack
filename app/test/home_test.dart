@@ -285,8 +285,10 @@ void main() {
     expect(find.byKey(const Key('testnet-pill')), findsOneWidget);
     expect(find.text('TESTNET'), findsOneWidget);
     // A chip as wide as its word, not a bar across the header.
-    expect(tester.getSize(find.byKey(const Key('testnet-pill'))).width,
-        lessThan(120));
+    expect(
+      tester.getSize(find.byKey(const Key('testnet-pill'))).width,
+      lessThan(120),
+    );
     expect(find.text('Morning Movers'), findsOneWidget);
     expect(find.text('THE BAR'), findsOneWidget);
     expect(find.text('3 / 6 check-ins'), findsOneWidget);

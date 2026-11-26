@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -10,10 +12,12 @@ import '../util/format.dart';
 import 'aurora.dart';
 import 'controls.dart';
 import 'glass.dart';
+import 'run_loader.dart';
 
 export 'aurora.dart';
 export 'controls.dart';
 export 'glass.dart';
+export 'run_loader.dart';
 
 /// Keeps the phone layout on wide screens (the web build on a laptop, a
 /// tablet): the app sits in a centred column of at most [maxWidth]. Narrower
@@ -449,11 +453,86 @@ class _RenderSizeReporter extends RenderProxyBox {
   }
 }
 
+/// Something is being read and there is nothing to show yet: the running
+/// mark ([RunLoader], 56) and one short line under it, on a glass card the
+/// size of the card it stands in for. For a wait inside a row or a sentence
+/// use [LoadingLine]; for a wait with named steps, [RunProgress].
+class LoadingCard extends StatelessWidget {
+  const LoadingCard({super.key, this.label, this.minHeight = 168});
+
+  /// "Reading the round…"
+  final String? label;
+
+  /// About as tall as what will replace it, so the screen does not jump.
+  final double minHeight;
+
+  @override
+  Widget build(BuildContext context) => GlassCard(
+    child: ConstrainedBox(
+      constraints: BoxConstraints(minHeight: minHeight - 36),
+      child: Center(child: RunLoader(label: label)),
+    ),
+  );
+}
+
+/// A wait inside a row or under a heading: the small running mark
+/// ([RunLoader.small]) and a few words beside it ("Reading your
+/// check-ins…").
+class LoadingLine extends StatelessWidget {
+  const LoadingLine(this.text, {super.key});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    liveRegion: true,
+    label: 'Loading. $text',
+    child: ExcludeSemantics(
+      child: Row(
+        children: [
+          const RunLoader.small(),
+          const SizedBox(width: Space.s3),
+          Expanded(
+            child: Text(
+              text,
+              style: context.type
+                  .body(14, FontWeight.w500)
+                  .copyWith(color: context.colors.text2),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Something could not be loaded: one sentence and a way to try again.
-class ErrorRetry extends StatelessWidget {
+/// When [onRetry] returns a future the button runs ([RunLoader.small],
+/// "Trying again…") until it is done.
+class ErrorRetry extends StatefulWidget {
   const ErrorRetry({super.key, required this.text, required this.onRetry});
   final String text;
-  final VoidCallback onRetry;
+  final FutureOr<void> Function() onRetry;
+
+  @override
+  State<ErrorRetry> createState() => _ErrorRetryState();
+}
+
+class _ErrorRetryState extends State<ErrorRetry> {
+  bool _busy = false;
+
+  Future<void> _retry() async {
+    final result = widget.onRetry();
+    if (result is! Future) return;
+    setState(() => _busy = true);
+    try {
+      await result;
+    } catch (_) {
+      // The screen shows what went wrong; the button only stops running.
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -467,7 +546,7 @@ class ErrorRetry extends StatelessWidget {
             children: [
               Icon(Icons.warning_amber_rounded, size: 20, color: c.danger),
               const SizedBox(width: Space.s2),
-              Expanded(child: Text(text, style: context.type.body(15))),
+              Expanded(child: Text(widget.text, style: context.type.body(15))),
             ],
           ),
           const SizedBox(height: Space.s4),
@@ -476,7 +555,9 @@ class ErrorRetry extends StatelessWidget {
             height: Sizes.buttonSmall,
             icon: Icons.refresh_rounded,
             label: 'Try again',
-            onPressed: onRetry,
+            busy: _busy,
+            busyLabel: 'Trying again…',
+            onPressed: _retry,
           ),
         ],
       ),

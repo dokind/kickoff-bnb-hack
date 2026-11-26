@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -7,18 +9,29 @@ import '../services/verifier_api.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import '../util/format.dart';
+import '../util/pot.dart';
 import '../widgets/common.dart';
 import '../widgets/gauges.dart';
 import 'health_sheet.dart';
 
-/// Opens the check-in sheet for [round] over the current screen.
+/// Opens the check-in sheet for [round] over the current screen. With
+/// [then], once the day is on chain the sheet shows the new share for a
+/// moment ([CheckInSheet.linger]), closes itself and calls [then] (Home
+/// opens Your round); its button, [thenLabel], does the same at once.
 Future<void> showCheckInSheet(
   BuildContext context,
   AppState state,
-  Round round,
-) => showAppSheet<void>(
+  Round round, {
+  VoidCallback? then,
+  String thenLabel = 'See your round',
+}) => showAppSheet<void>(
   context,
-  builder: (_) => CheckInSheet(state: state, round: round),
+  builder: (_) => CheckInSheet(
+    state: state,
+    round: round,
+    then: then,
+    thenLabel: thenLabel,
+  ),
 );
 
 /// Today's check-in.
@@ -39,11 +52,24 @@ Future<void> showCheckInSheet(
 /// name is over the title, and the check-in is for that round whatever card
 /// is in view on Home behind it.
 class CheckInSheet extends StatefulWidget {
-  const CheckInSheet({super.key, required this.state, required this.round});
+  const CheckInSheet({
+    super.key,
+    required this.state,
+    required this.round,
+    this.then,
+    this.thenLabel = 'See your round',
+  });
   final AppState state;
 
   /// The round named on the button that opened the sheet.
   final Round round;
+
+  /// Called after the sheet has closed itself on a recorded check-in.
+  final VoidCallback? then;
+  final String thenLabel;
+
+  /// How long the new share stays in view before the sheet closes itself.
+  static const linger = Duration(milliseconds: 2600);
 
   @override
   State<CheckInSheet> createState() => _CheckInSheetState();
@@ -56,6 +82,11 @@ class _CheckInSheetState extends State<CheckInSheet> {
 
   /// The check-in transaction, once it is mined.
   String? _tx;
+
+  /// "Your share went from 25% to 40%.", once the day is on chain and the
+  /// round has been read again.
+  String? _shareMoved;
+  Timer? _leave;
 
   /// The last read of the health store. Null before the first read ends.
   StepsRead? _last;
@@ -116,9 +147,38 @@ class _CheckInSheetState extends State<CheckInSheet> {
 
   @override
   void dispose() {
+    _leave?.cancel();
     _life.dispose();
     _typed.dispose();
     super.dispose();
+  }
+
+  /// Closes the sheet and goes on to [CheckInSheet.then].
+  void _goOn() {
+    _leave?.cancel();
+    final then = widget.then;
+    if (!mounted || then == null) return;
+    Navigator.of(context).pop();
+    then();
+  }
+
+  /// This wallet's days and all check-ins of the sheet's round, counted
+  /// the way THE PRIZE and Your round count them ([Pot]), when the state is
+  /// reading that round (it is the selected one).
+  (int, int)? _shareNow() {
+    final id = widget.round.id;
+    if (_state.selected != id || !_state.yourDaysKnown) return null;
+    final days = _state.daysIn(id);
+    final pot = Pot.build(
+      prize: BigInt.zero,
+      totalCheckIns: _state.totalCheckIns,
+      memberCount: 0,
+      members: [for (final m in _state.members) (m.address, m.daysOf)],
+      you: _state.address,
+      isMember: true,
+      yourDays: days,
+    );
+    return (days, pot.total);
   }
 
   /// Reads today's steps. [ask] is true when the person pressed a button
@@ -162,16 +222,36 @@ class _CheckInSheetState extends State<CheckInSheet> {
   });
 
   Future<void> _checkIn() async {
+    // An empty field is said here and nothing is sent: the server would only
+    // answer "0 steps".
+    if (_typedMode &&
+        !_pending &&
+        int.tryParse(_typed.text.trim().replaceAll(',', '')) == null) {
+      setState(() => _error = 'Type today\'s steps first.');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
     });
+    final before = _shareNow();
     try {
       final tx = await _state.checkIn(
-        selfReported: _typedMode ? int.tryParse(_typed.text.trim()) ?? 0 : null,
+        selfReported: _typedMode
+            ? int.tryParse(_typed.text.trim().replaceAll(',', '')) ?? 0
+            : null,
         launcher: widget.round.launcher,
       );
-      if (mounted) setState(() => _tx = tx);
+      final after = _shareNow();
+      if (mounted) {
+        setState(() {
+          _tx = tx;
+          _shareMoved = before == null || after == null
+              ? null
+              : shareChangeSentence(before.$1, before.$2, after.$1, after.$2);
+        });
+        if (widget.then != null) _leave = Timer(CheckInSheet.linger, _goOn);
+      }
     } catch (e) {
       if (mounted) setState(() => _error = friendlyError(e));
     } finally {
@@ -214,6 +294,26 @@ class _CheckInSheetState extends State<CheckInSheet> {
           'tomorrow.',
           style: t.body(15).copyWith(color: c.text2),
         ),
+        if (_shareMoved != null) ...[
+          const SizedBox(height: Space.s3),
+          Semantics(
+            container: true,
+            liveRegion: true,
+            child: Row(
+              children: [
+                Icon(Icons.trending_up_rounded, size: 20, color: c.volt),
+                const SizedBox(width: Space.s2),
+                Expanded(
+                  child: Text(
+                    _shareMoved!,
+                    key: const Key('checkin-share-moved'),
+                    style: t.body(16, FontWeight.w700).copyWith(color: c.volt),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: Space.s4),
         GlassCard(
           radius: Radii.row,
@@ -225,7 +325,18 @@ class _CheckInSheetState extends State<CheckInSheet> {
           ),
         ),
         const SizedBox(height: Space.s6),
-        PillButton(label: 'Done', onPressed: () => Navigator.of(context).pop()),
+        if (widget.then != null)
+          PillButton(
+            kind: PillKind.volt,
+            icon: Icons.arrow_forward_rounded,
+            label: widget.thenLabel,
+            onPressed: _goOn,
+          )
+        else
+          PillButton(
+            label: 'Done',
+            onPressed: () => Navigator.of(context).pop(),
+          ),
       ],
     );
   }
@@ -270,7 +381,7 @@ class _CheckInSheetState extends State<CheckInSheet> {
           GlassField(
             fieldKey: const Key('steps'),
             controller: _typed,
-            placeholder: formatCount(min * 6),
+            placeholder: 'Type today\'s steps',
             label: 'Steps today, self-reported',
             number: true,
             suffix: 'steps',
