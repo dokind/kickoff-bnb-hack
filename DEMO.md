@@ -44,6 +44,12 @@ Two more things a judge may try:
       the attester `0x2f2ab3da0b824f9ca3edd2580443ca0b271efdd7` (in lower case there). If the
       tunnel restarted, the server writes the new host on its next check (every 60 seconds by
       default, `ORIGIN_CHECK_SECONDS`).
+- [ ] **The TestFlight build is approved**: https://testflight.apple.com/join/bp4WaEu5 opens the
+      Cypher Run page in TestFlight (until Apple approves build 202611261221 it says the beta is
+      not accepting testers). If it is not approved, send iPhone judges to the web app.
+- [ ] **The Android download works**: the newest run of the "Android app" workflow is green and
+      https://github.com/dokind/kickoff-bnb-hack/releases/download/android-latest/cypher-run.apk
+      downloads.
 - [ ] **The site opens on mobile data**, not on the venue wifi: https://dokind.github.io/kickoff-bnb-hack/
       on a phone with wifi off, through Get started to Home.
 - [ ] **A fresh round with room for the judges.** Start one shortly before the talk, with a goal
