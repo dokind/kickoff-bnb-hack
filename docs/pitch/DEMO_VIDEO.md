@@ -1,5 +1,31 @@
 # Cypher Run demo video: production brief
 
+> **Status, 26 November 2026: the video is made.** The cut is 85 seconds
+> (`pitch-video/cypher-run-demo-1920x1080.mp4`, 85.1 s by `ffprobe`, with a 1080x1920 copy; the MP4
+> files are git-ignored and stay on the owner's machine, the captions are in
+> `pitch-video/cypher-run-demo.srt`). It is voiced in the owner's own voice: an AI clone of the
+> owner's voice, line by line from
+> [`pitch-video/READ-THIS-VOICEOVER.md`](../../pitch-video/READ-THIS-VOICEOVER.md). It follows that
+> 11-line script, not the 2:00 scene plan below; this brief is kept as the record of how the video
+> was planned.
+>
+> **Being re-voiced: lines 1, 7, 10 and 11.** Their words were rewritten to the final positioning
+> (split by days, not paid by others; we never hold the money) and are being recorded again in the
+> same voice clone. The new words are in `pitch-video/voiceover-lines.json`, which the voice tools
+> read, and in `pitch-video/voiceover.txt`. **Do not upload the 85.1 s cut or its captions as they
+> are:** its voice (`pitch-video/vo/s1, s7, s10, s11.aiff`) still says the old lines, and three of
+> its picture cards in `pitch-video/compositor.html` (s1, s10, s11) still show the old words.
+> `pitch-video/cypher-run-demo.srt` already carries the new words, but at the old lines' times,
+> worked out by `pitch-video/srt.mjs` from the current voice files. After the four lines are
+> re-voiced: put the new card text in `compositor.html`, render again with `render.mjs` (not
+> `dub-video.mjs`, which keeps the old picture), run `srt.mjs` again from the new voice files (it
+> reads `vo/lines.txt`, a copy of `voiceover.txt`), and recheck the chapter times in section 11.
+>
+> **The upload text in section 11 is the final one**, in the final positioning: the pot is safe, the
+> launch is the bonus. Where the plan in sections 1 to 10 words something differently, the
+> [README](../../README.md) wins: "every deposit comes back" always means "if the round has not
+> launched by the deadline".
+
 This brief is for a Claude Code session on the owner's Windows or Mac PC. Use it to make the demo
 video for the HackQuest submission of **Cypher Run** at BNB Hack Bangkok. You have not seen this
 project before. Everything you need is in this file. You do not need to clone the repo, and you
@@ -36,10 +62,11 @@ must not change it.
 
 ## 1. The product, in facts you may use (all verified in the repo)
 
-**One line:** Cypher Run is a paid discipline app. You pay a deposit and check in each day you
-move. Everyone's check-ins fill one bar. When the bar is full, anyone can launch the round's
-token through Flap Pool Launch. The prize, half the token supply and 80% of the trading tax are
-shared by days shown up. If the group misses the goal by the deadline, every deposit comes back.
+**One line:** Cypher Run turns showing up into a community, and a community into a launch. You pay
+a deposit and check in each day you move. Everyone's check-ins fill one bar. When the bar is full,
+anyone can launch the round's token through Flap Pool Launch. The prize, half the token supply and
+80% of the trading tax are shared by days shown up. If the round has not launched by the deadline,
+every deposit comes back. The pot is safe; the launch is the bonus.
 
 **How a round works**
 
@@ -57,7 +84,9 @@ shared by days shown up. If the group misses the goal by the deadline, every dep
   (3% buy, 5% sell) go to the round's vault. The other 20% of the tax is burned.
 - Claim: a member with `d` days gets `d / all check-ins` of the vault. **A member with 0 days gets
   nothing.** Each day counts the same, so a beginner's day is worth as much as a marathoner's.
-- Deadline missed: every member gets the full deposit back, and every sponsor gets their money back.
+- Not launched by the deadline (the bar not full, the pool under Flap's floor, or nobody pressed
+  Launch): every member gets the full deposit back, and every sponsor gets their money back. If it
+  launched, there is no refund: the vault is split by days.
 - Sponsors (brands, clubs, races) can add money to the token pool. They get no share.
 
 **Proof on BSC testnet: the round "Bangkok Showup" (25 Nov 2026), complete**
@@ -94,11 +123,11 @@ shared by days shown up. If the group misses the goal by the deadline, every dep
 
 **Judges' round:** "Bangkok Demo Run", Launcher `0xcF7957Dc48E5c16732331d27E2C2a1b2A9FA5876`.
 The deposit is 100 test USD and the goal is 12 check-ins. The pool is already sponsored to Flap's
-1,500 test USD floor. Script wallets Ana, Ben and Chai are in it. It is the featured round, the
-first card on Home.
+1,500 test USD floor. Three script wallets and one more member wallet are in it. It is the
+featured round, the first card on Home.
 
-**Tests:** 69 contract tests (74 including 5 fork tests against the live Portal) and 171 server
-tests. Do not put an app test count on screen.
+**Tests:** 75 contract tests (80 including 5 fork tests against the live Portal) and 203 server
+tests, as of 26 November 2026. Do not put an app test count on screen.
 
 **Honest limits** (the video states the first one, and none of them may be hidden):
 
@@ -109,13 +138,13 @@ tests. Do not put an app test count on screen.
 - The reserved tokens can be traded from the moment of launch.
 - The contracts take no fee yet.
 
-**App screens you will see:** the welcome screen ("RUN THE STAKES." and "Put in 500. Show up each
-day. Split the prize with everyone who did."); Home, with a slider of round cards, a TESTNET pill
+**App screens you will see:** the welcome screen ("RUN THE STAKES." and "Put in a test deposit.
+Show up each day. Split the prize with everyone who did."); Home, with a slider of round cards, a TESTNET pill
 and THE PRIZE ("If it launched now, each day shown up would be worth about X test USD", plus
 members with friendly names such as "Gentle Giraffe"); the one-button join ("Join with test
 dollars · 100 test USD", with a progress loader); Your round (WHAT YOU GET, YOUR MONEY, HOW IT ENDS
 and YOUR WEEK); the check-in sheet; and the result screen after a launch ("Launched on Flap",
-"THE TOKEN IS LIVE.", Claim).
+"THE COIN IS LIVE.", Claim).
 
 ## 2. The video at a glance
 
@@ -145,11 +174,11 @@ word at about 140 to 150 words per minute. There are 265 words in total.
 
 - **Picture:** the welcome screen, still ("RUN THE STAKES."). Take it from the first seconds of
   recording R1.
-- **Voiceover:** "Your gym gets paid when you quit. Cypher Run pays the people who show up. On
+- **Voiceover:** "Your gym gets paid when you quit. Cypher Run splits the pot by days shown up. On
   testnet, it already did."
-- **Headline:** YOUR GYM GETS PAID WHEN YOU QUIT. Sub-line: "Cypher Run pays the people who show
-  up." (No statistic about quitting: there is no source for one, and the rules forbid made-up
-  numbers.)
+- **Headline:** YOUR GYM GETS PAID WHEN YOU QUIT. Sub-line: "Cypher Run splits the pot by days
+  shown up." (No statistic about quitting: there is no source for one, and the rules forbid
+  made-up numbers.)
 
 ### Scene 2: join (0:10–0:30)
 
@@ -171,7 +200,7 @@ word at about 140 to 150 words per minute. There are 265 words in total.
   Health Connect. Every check-in fills one shared bar. Full by the deadline: anyone launches the
   token. Miss it: every deposit comes back."
 - **Headline:** EVERY CHECK-IN FILLS ONE BAR. Sub-lines: "Full by the deadline → anyone launches
-  the token on Flap." / "Not full → every deposit comes back." Small print: "Web demo: steps typed
+  the token on Flap." / "Not launched by the deadline → every deposit comes back." Small print: "Web demo: steps typed
   in (testnet only). The phone apps read Apple Health / Health Connect."
 
 ### Scene 4a: the real launch (0:48–1:04)
@@ -292,7 +321,7 @@ once, and only if the owner agrees.
    Home opens with Bangkok Showup selected and shows that it has launched.
 2. Start recording. If THE PRIZE on this card lists the three members with their amounts, scroll to
    it and hold for 3 seconds. Then press **"See the result · Bangkok Showup"**.
-3. The result screen shows "Launched on Flap", "THE TOKEN IS LIVE." and "Bangkok Showup filled the
+3. The result screen shows "Launched on Flap", "THE COIN IS LIVE." and "Bangkok Showup filled the
    bar with 3 check-ins…". Hold for 4 seconds, then scroll slowly to "Your days". This wallet has 0
    days, so the screen will say it has no check-ins in this round, which is fine. **Do not press
    Claim.**
@@ -413,11 +442,11 @@ const pill = '<div class="pill">TESTNET · NO REAL MONEY</div>';
 const phone = (kicker, h, rest) => `<div class="slot"></div><div class="panel"><div class="kicker">${kicker}</div><h1>${h}</h1>${rest}</div>${pill}`;
 const S = {
   s1: phone('01 · The hook', 'Your gym<br>gets paid<br>when you quit.',
-    '<div class="sub">Cypher Run pays the people who show up.</div>'),
+    '<div class="sub">Cypher Run splits the pot by days shown up.</div>'),
   s2: phone('02 · Join', 'Put in<br>a deposit.',
     '<div class="sub"><b>One tap. 100 test USD.</b><br>The app spells out what you put in, what you can get, and how it ends.</div>'),
   s3: phone('03 · Show up', 'Every check-in<br>fills one bar.',
-    '<div class="sub">Full by the deadline → <b>anyone launches the token on Flap.</b><br>Not full → <b>every deposit comes back.</b></div>' +
+    '<div class="sub">Full by the deadline → <b>anyone launches the token on Flap.</b><br>Not launched by the deadline → <b>every deposit comes back.</b></div>' +
     '<div class="small">Web demo: steps typed in (testnet only). The phone apps read Apple Health / Health Connect.</div>'),
   s4a: `<div class="label">The real launch. On chain.<span>Flap testnet site + BscScan testnet · 47 transactions, all public</span></div>${pill}`,
   s4b: phone('04 · Bangkok Showup, BSC testnet', 'It already<br>happened.',
@@ -432,7 +461,7 @@ const S = {
     <tr><td>Move to earn<span class="ex">STEPN · Sweatcoin</span></td><td>No shared pot</td><td>Nothing shared: new tokens, ads</td><td>No group goal</td></tr>
     <tr><td>Step challenges<span class="ex">Strava</span></td><td>No money</td><td>A badge</td><td>Nothing at stake</td></tr>
     <tr><td>Plain token launch<span class="ex">money fills the bar</span></td><td>A contract</td><td>Nobody has to show up</td><td>Money goal only</td></tr>
-    <tr class="us"><td>Cypher Run</td><td>A contract, not us</td><td><b>A Flap launch:</b> half the token supply + 80% of its tax, on top of the deposits</td><td><b>Every deposit comes back</b></td></tr></table>
+    <tr class="us"><td>Cypher Run</td><td>A contract, not us</td><td><b>A Flap launch:</b> half the token supply + 80% of its tax, on top of the deposits</td><td><b>Not launched by the deadline: every deposit back</b></td></tr></table>
     <div class="note">Fewer days, smaller share. Zero days: your deposit goes to those who showed up. One day = one share, beginner or marathoner.</div></div>${pill}`,
   s6: `<div class="full"><div class="kicker">06 · How it is built</div><h1>Contracts hold the money.<br>Not us.</h1>
     <div class="arch">
@@ -442,7 +471,7 @@ const S = {
       <div class="arrow">→</div>
       <div class="box chain"><h3>BNB CHAIN (TESTNET)</h3><p><b>Launcher Factory</b>, enabled on the Flap Portal</p><p><b>Launcher</b>: deposits, check-ins, the bar</p><p><b>launch()</b>, by anyone → Flap: token + pool, LP burned</p><p><b>Vault</b>: prize + half the supply + 80% of tax → claim by days</p></div>
     </div>
-    <div class="strip">69 contract tests (+5 against the live Portal on a fork) · 171 server tests · open source · github.com/dokind/kickoff-bnb-hack</div></div>${pill}`,
+    <div class="strip">75 contract tests (+5 against the live Portal on a fork) · 203 server tests · open source · github.com/dokind/kickoff-bnb-hack</div></div>${pill}`,
   s7: `<div class="full" style="top:110px"><div class="kicker">07 · Try it</div><h1>Try it in 60 seconds.</h1>
     <div class="links">
       <div class="k">Web, no install</div><div class="u">dokind.github.io/kickoff-bnb-hack</div>
@@ -558,7 +587,7 @@ synthetic one. Send them the script in section 3 and these notes:
 **Placeholder until then: the computer's own voice** (never ship this if the owner sends a
 recording):
 
-- macOS: `say -v Samantha -r 165 -o audio/s1.aiff "Your gym gets paid when you quit. Cypher Run pays the people who show up. On testnet, it already did."`
+- macOS: `say -v Samantha -r 165 -o audio/s1.aiff "Your gym gets paid when you quit. Cypher Run splits the pot by days shown up. On testnet, it already did."`
   then `ffmpeg -y -i audio/s1.aiff -ar 48000 audio/s1.wav`. Repeat for each scene.
 - Windows PowerShell:
 
@@ -567,7 +596,7 @@ recording):
   $t = New-Object System.Speech.Synthesis.SpeechSynthesizer
   $t.Rate = 1
   $t.SetOutputToWaveFile("$PWD\audio\s1.wav")
-  $t.Speak("Your gym gets paid when you quit. Cypher Run pays the people who show up. On testnet, it already did.")
+  $t.Speak("Your gym gets paid when you quit. Cypher Run splits the pot by days shown up. On testnet, it already did.")
   $t.Dispose()
   ```
 
@@ -600,7 +629,7 @@ Your gym gets paid when you quit.
 
 2
 00:00:03,300 --> 00:00:06,400
-Cypher Run pays the people who show up.
+Cypher Run splits the pot by days shown up.
 
 3
 00:00:06,500 --> 00:00:09,000
@@ -856,35 +885,51 @@ sure it plays without a login. Give the link to the owner.
 
 **YouTube title:** `Cypher Run: show up together, launch together · BNB Hack Bangkok (testnet demo)`
 
-**YouTube description and HackQuest description field** (remove the iPhone line if TestFlight is
-not approved):
+**YouTube description and HackQuest description field.** The final text, in the final
+positioning: the pot is safe, the launch is the bonus. The iPhone line carries its caveat: the
+TestFlight link opens only after Apple approves the beta (build 202611261356 was in Apple's beta
+review on 26 November 2026). Once Apple approves it, the caveat in brackets can go; if it is still
+not approved at upload time, keep the caveat or remove the line. The Squad A line links to Season 1
+Squad A, created on BSC testnet on 26 November 2026.
 
 ```text
-Cypher Run is a paid discipline app on BNB Chain, built on Flap Pool Launch.
+Cypher Run turns showing up into a community, and a community into a launch. Built on Flap Pool Launch, on BNB Chain. Voiced in the founder's own voice (an AI clone of it).
 
-Put in a deposit. Check in each day you move (the phone app reads Apple Health or Health Connect). Everyone's check-ins fill one bar. When the bar is full, anyone can launch the round's token through Flap. The prize, half the token supply and 80% of the trading tax are shared by days shown up. If the group misses the goal by the deadline, every deposit comes back. Contracts hold the money, not us.
+The pot is safe, the launch is the bonus. A group puts in equal deposits and checks in each day they walk 1,000 steps or more (the phone app reads Apple Health or Health Connect; on the web you type them, testnet only). Everyone's check-ins fill one bar.
 
-Proof on BSC testnet: the round "Bangkok Showup" launched through our Launcher Factory (enabled on the Flap Portal) and paid 822.32 / 411.16 / 0 test USD to members with 2 / 1 / 0 days. 47 transactions, all listed in PROOF.md. It was a scripted test round with typed-in steps.
+Two endings. The group falls short: if the round has not launched by its deadline, each member presses Refund and gets 100% of the deposit back. The bar fills: anyone can launch the group's own coin through Flap. 1,000,000 coins: half into a shop locked forever (its LP is burned), half into the group's piggy bank with the prize, plus 80% of 30 days of trading tax (3% on buys, 5% on sells; the other 20% is burned). The piggy bank is split by days shown up, not by dollars; 0 days gets nothing.
 
-Honest bound: our server's key decides which check-ins count. It cannot move funds, launch early or block a launch.
+Why Flap Pool Launch: members get a free bonus on top of a safe pot, paid for by a sponsor; sponsors launch their community's coin with a crowd that has already proven it shows up; and Flap gets launches that can't happen until a community exists, because days of people showing up are the launch condition.
 
-Testnet only. Test USD has no value.
+Season 1: Show Up 30 starts Tue 1 Dec 2026, in squads of 10. A sponsor fills each squad's shop, so every deposit is prize: keep up with the average member and you get your whole deposit back, or more (sponsored rounds, test USD, once the round launches). Join Squad A · starts Tue 1 Dec: https://dokind.github.io/kickoff-bnb-hack/#/r/0xa60e2f022d891dd394415a594c9e33614c019153
+
+Proof on BSC testnet: the round "Bangkok Showup" launched through our Launcher Factory (enabled on Flap's testnet Portal) and split its prize and trading tax by days: 822.32 / 411.16 / 0 test USD to members with 2 / 1 / 0 days. A split, not a return: it was a scripted test round with typed-in steps, and the tax came from our own test trades. 47 transactions, all listed in PROOF.md. The refund ending ran on testnet too: a round with a full bar that never launched (its shop was under Flap's floor) paid 150 test USD back after its deadline, exactly what its wallet put in.
+
+Honest bound: our server's key decides which check-ins count (attested, not proven). It cannot move funds, launch early or block a launch. We never hold the money.
+
+Testnet only. Test USD has no value. Not audited.
 
 Try it (web, no install): https://dokind.github.io/kickoff-bnb-hack/
 Android: https://github.com/dokind/kickoff-bnb-hack/releases/download/android-latest/cypher-run.apk
-iPhone (TestFlight): https://testflight.apple.com/join/bp4WaEu5
+iPhone (TestFlight; the link opens only after Apple approves the beta): https://testflight.apple.com/join/bp4WaEu5
 Code: https://github.com/dokind/kickoff-bnb-hack
 Proof: https://github.com/dokind/kickoff-bnb-hack/blob/main/PROOF.md
 Whitepaper: https://github.com/dokind/kickoff-bnb-hack/blob/main/docs/WHITEPAPER.md
 
-0:00 The hook
-0:10 Join a round
-0:30 Check in, fill the bar
-0:48 Proof: a real launch on testnet
-1:12 Why it is different
-1:35 How it is built
-1:50 Try it
+0:00 The idea, and joining a round
+0:24 Check in, fill the bar
+0:45 The launch, and a testnet round split by days
+1:01 Who it is for: a marathon, a charity walk
+1:14 We never hold the money
 ```
+
+The chapter times are where lines 5, 7, 8 and 10 start in the 85-second cut as first rendered.
+Rechecked on 26 November against `pitch-video/cypher-run-demo.srt` as it is now (the new words at
+the old times): 0:24.7, 0:45.3, 1:01.5 and 1:14.0, so the list above still holds for that timeline.
+A new render with the re-voiced lines moves all four by the change in line 1's length (line 7's
+scene has a fixed length, and line 10 starts its own chapter), so read them again from the new
+cut's captions before uploading. YouTube needs each chapter to be at least 10 seconds, so the hook
+and the join share the first one.
 
 ## 12. What to ask the owner (ask early, all at once)
 

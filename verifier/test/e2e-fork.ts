@@ -234,6 +234,7 @@ async function main() {
       attester: attester.address.toLowerCase(),
       attesterReady: true,
       quoteDecimals: 18,
+      season: null,
       raw: undefined,
     },
   );

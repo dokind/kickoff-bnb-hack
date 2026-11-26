@@ -6,7 +6,19 @@
 //
 // Run it from the verifier folder: viem is taken from verifier/node_modules.
 //
-// What it does, in order:
+// CREATE_ONLY=true, for a real round such as a Season squad: the deployer opens the round and, unless
+// SPONSOR_USD is 0, sponsors its shop; the script prints the launcher, writes the state file and stops.
+// It does NOT point the server at the round (no POST /admin/round, so the featured round stays as it
+// is) and it funds and joins no throwaway members. VERIFIER_URL is optional then: when it is given, the
+// script first checks (GET /health) that the server signs as the attester the round will name. A state
+// file started with CREATE_ONLY can only be continued with CREATE_ONLY. Season 1 Squad A:
+//
+//   cd verifier && CREATE_ONLY=true ROUND_NAME="Season 1 Squad A" DEPOSIT_USD=100 LIQUIDITY_BPS=0 \
+//     CHECKIN_GOAL=240 DEADLINE_AT=2026-12-31T23:59:59Z SPONSOR_USD=1500 \
+//     ATTESTER_ADDRESS=0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7 \
+//     STATE_FILE=../scripts/season1-a-run.json npx tsx ../scripts/run-round.ts
+//
+// What it does without CREATE_ONLY, in order:
 //    1. The deployer wallet opens a round with Portal.newLauncher and our CheckInLauncherFactory.
 //       The launch salt is mined from a random start so the token address ends in 0x7777.
 //    2. The verifier is pointed at the round (POST /admin/round).
@@ -57,17 +69,25 @@
 // Every transaction is a legacy transaction at 1 gwei with an explicit gas limit: fee estimation on
 // this testnet can return 1 wei, and such transactions are never mined.
 //
-// Settings (environment variables, all optional except VERIFIER_URL):
+// Settings (environment variables, all optional except VERIFIER_URL, which CREATE_ONLY does not need):
 //   VERIFIER_URL       base of the verifier API, e.g. https://<host>/api            (required)
 //   RPC_URL            BSC testnet RPC             default: verifier/.env RPC_URL or publicnode
 //   STATE_FILE         progress file               default: scripts/round-run.json
-//   ROUND_NAME         default "Bangkok Cypher Run"
-//   ROUND_SYMBOL       symbol the Portal needs for the token; default "CYPHER"
+//   CREATE_ONLY        "true": open (and sponsor) the round, then stop; see above   default off
+//   ROUND_NAME         default "Bangkok Cypher Run". No " or \ and no control characters: the
+//                      Portal's description JSON takes the name as it is
+//   ROUND_SYMBOL       symbol the Portal needs for the token; default "CYPHER" (same rule)
 //   DEPOSIT_USD        deposit per member in whole test USD                        default 1000
-//   LIQUIDITY_BPS      part of the deposits that seeds the pool, basis points      default 3000
-//   CHECKIN_GOAL       check-ins that fill the bar                                 default 2
+//   LIQUIDITY_BPS      part of the deposits that builds the shop (the pool), basis points, 0 to
+//                      10000. 0 = a sponsored round: the shop is sponsor money only and every
+//                      deposit is prize                                            default 3000
+//   CHECKIN_GOAL       check-ins that fill the bar, 1 to 1,000,000                 default 2
 //   DEADLINE_HOURS     round deadline, hours from the start of the run             default 30
-//   SPONSOR_USD        "auto" (top the pool up to POOL_FLOOR_USD), or a whole number, or 0
+//   DEADLINE_AT        round deadline as an ISO time with a zone, e.g. 2026-12-31T23:59:59Z.
+//                      Overrides DEADLINE_HOURS. The factory takes a deadline up to 90 days after
+//                      the block that opens the round.
+//   SPONSOR_USD        "auto" (default: top the pool up to POOL_FLOOR_USD), or a whole number: the
+//                      deployer's total sponsor money in test USD (a continued run tops up to it, never more; 0 = none)
 //   POOL_FLOOR_USD     Flap's pool floor on testnet in whole test USD              default 1500
 //   ATTESTER_ADDRESS   default: the address of the key in verifier/.env
 //   MEMBER_COUNT       how many of the three throwaway members join (1 to 3)       default 3
@@ -163,6 +183,9 @@ const launcherAbi = parseAbi([
   "function sponsor(uint256 amount)",
   "function checkIn(uint256 day, bytes signature)",
   "function launch()",
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function creator() view returns (address)",
   "function deposit() view returns (uint256)",
   "function liquidityBps() view returns (uint256)",
   "function checkInGoal() view returns (uint256)",
@@ -224,6 +247,7 @@ const root = resolve(process.cwd(), "..");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
 const nowSec = () => Math.floor(Date.now() / 1000);
+const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
 const usd = (whole: number | string) => parseEther(String(whole));
 
 /** KEY=value lines of an env file. Values are returned, never printed. */
@@ -240,9 +264,31 @@ function envFile(path: string): Record<string, string> {
 const asKey = (value: string): Hex => (value.startsWith("0x") ? value : `0x${value}`) as Hex;
 
 function wholeNumber(name: string, fallback: number, min: number, max: number): number {
-  const n = Number(process.env[name] ?? fallback);
+  // An empty value counts as unset: Number("") would silently be 0.
+  const raw = process.env[name];
+  const n = raw === undefined || raw === "" ? fallback : Number(raw);
   if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${name} must be a whole number from ${min} to ${max}`);
   return n;
+}
+
+/** An ISO time with a time zone, in whole unix seconds; null when the variable is unset or empty. */
+function isoSeconds(name: string): number | null {
+  const value = process.env[name];
+  if (value === undefined || value === "") return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    throw new Error(`${name} must be an ISO time with a time zone, e.g. 2026-12-31T23:59:59Z`);
+  }
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms) || ms % 1000 !== 0) throw new Error(`${name} must be a valid time in whole seconds`);
+  return ms / 1000;
+}
+
+/** The Portal's description JSON takes the name and symbol as they are: no quote, backslash or control character. */
+function plainText(name: string, value: string): string {
+  if (value.length === 0 || /["\\\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`${name} must be non-empty, without " or \\ or control characters`);
+  }
+  return value;
 }
 
 interface TxRecord {
@@ -255,6 +301,8 @@ interface State {
   runId: string;
   startedAt: number;
   deadline: number;
+  /** True for a CREATE_ONLY round: such a state file is never continued into the full run. */
+  createOnly?: boolean;
   /** Kept from the first run, so a continued run has the same members whatever the environment says. */
   memberCount?: number;
   yesterdayCheckIn?: boolean;
@@ -271,10 +319,16 @@ async function main() {
   }
   const FACTORY = getAddress(deployments.checkInLauncherFactory);
 
+  // Strict on purpose: a typo here ("1", "yes") must not fall through to the full run, which would
+  // point the server at the round and join throwaway members to it.
+  const createOnlySetting = process.env.CREATE_ONLY ?? "";
+  if (!["", "true", "false"].includes(createOnlySetting)) throw new Error('CREATE_ONLY must be "true" or "false"');
+  const createOnly = createOnlySetting === "true";
+
   const api = (process.env.VERIFIER_URL || "").replace(/\/$/, "");
-  if (!api) throw new Error("Set VERIFIER_URL to the verifier API, e.g. https://<host>/api");
+  if (!api && !createOnly) throw new Error("Set VERIFIER_URL to the verifier API, e.g. https://<host>/api");
   const adminToken = process.env.ADMIN_TOKEN || verifierEnv.ADMIN_TOKEN;
-  if (!adminToken) throw new Error("ADMIN_TOKEN not found in verifier/.env");
+  if (!adminToken && !createOnly) throw new Error("ADMIN_TOKEN not found in verifier/.env");
   const deployerKey = process.env.PRIVATE_KEY || contractsEnv.PRIVATE_KEY;
   if (!deployerKey) throw new Error("PRIVATE_KEY not found in contracts/.env");
   const rpcUrl = process.env.RPC_URL || verifierEnv.RPC_URL || "https://bsc-testnet-rpc.publicnode.com";
@@ -290,12 +344,14 @@ async function main() {
   if (!attesterAddress) throw new Error("Set ATTESTER_ADDRESS to the address of the server's attester key");
 
   const stateFile = process.env.STATE_FILE || join(root, "scripts/round-run.json");
-  const roundName = process.env.ROUND_NAME || "Bangkok Cypher Run";
-  const roundSymbol = process.env.ROUND_SYMBOL || "CYPHER";
+  const roundName = plainText("ROUND_NAME", process.env.ROUND_NAME || "Bangkok Cypher Run");
+  const roundSymbol = plainText("ROUND_SYMBOL", process.env.ROUND_SYMBOL || "CYPHER");
   const depositUsd = wholeNumber("DEPOSIT_USD", 1000, 1, 1_000_000);
   const liquidityBps = wholeNumber("LIQUIDITY_BPS", 3000, 0, 10_000);
-  const checkInGoal = wholeNumber("CHECKIN_GOAL", 2, 1, 1000);
+  // A Season squad of 10 needs 240 (10 x 30 days x 0.8); a 50-member club round 1,200.
+  const checkInGoal = wholeNumber("CHECKIN_GOAL", 2, 1, 1_000_000);
   const deadlineHours = wholeNumber("DEADLINE_HOURS", 30, 1, 90 * 24);
+  const deadlineAt = isoSeconds("DEADLINE_AT");
   const poolFloor = usd(wholeNumber("POOL_FLOOR_USD", 1500, 0, 1_000_000_000));
   const sponsorSetting = process.env.SPONSOR_USD || "auto";
   if (sponsorSetting !== "auto" && !/^\d+$/.test(sponsorSetting)) throw new Error('SPONSOR_USD must be "auto" or a whole number');
@@ -305,12 +361,29 @@ async function main() {
   if (existsSync(stateFile)) {
     state = JSON.parse(readFileSync(stateFile, "utf8"));
     log(`Continuing run ${state.runId} from ${stateFile}`);
+    if (state.createOnly && !createOnly) {
+      throw new Error(
+        `${stateFile} holds a CREATE_ONLY round (such as a Season squad). Continue it with CREATE_ONLY=true: ` +
+          `the full run would point the server at it and join test members to it.`,
+      );
+    }
+    if (createOnly && !state.createOnly && Object.keys(state.done).length > 0) {
+      throw new Error(`${stateFile} holds a full run, not a CREATE_ONLY one. Use another STATE_FILE for a new round.`);
+    }
+    if (deadlineAt !== null && deadlineAt !== state.deadline) {
+      throw new Error(
+        `${stateFile} was started with the deadline ${iso(state.deadline)}, but DEADLINE_AT is ${iso(deadlineAt)}. ` +
+          `Use another STATE_FILE for a new round.`,
+      );
+    }
+    if (createOnly) state.createOnly = true;
   } else {
     const t = nowSec();
     state = {
       runId: `${t}`,
       startedAt: t,
-      deadline: t + deadlineHours * 3600,
+      deadline: deadlineAt ?? t + deadlineHours * 3600,
+      createOnly,
       memberCount: wholeNumber("MEMBER_COUNT", 3, 1, MEMBERS.length),
       yesterdayCheckIn: process.env.YESTERDAY_CHECKIN === "true",
       done: {},
@@ -491,28 +564,61 @@ async function main() {
   }
 
   // ── 0. Checks before anything is sent ──────────────────────────────────────
-  // Behind the hosting proxy the service answers at <api>/; a verifier reached directly answers at
-  // <api> without the slash.
-  let health = await get("/");
-  if (!health.json?.ok) health = await get("");
-  if (!health.json?.ok) throw new Error(`verifier at ${api} did not answer ok`);
-  if (health.json.service !== SERVICE_NAME) {
-    throw new Error(`${api} answers as "${health.json.service}", not the ${PRODUCT_NAME} verifier. Is the new server deployed there?`);
+  if (api) {
+    // Behind the hosting proxy the service answers at <api>/; a verifier reached directly answers at
+    // <api> without the slash.
+    let health = await get("/");
+    if (!health.json?.ok) health = await get("");
+    if (!health.json?.ok) throw new Error(`verifier at ${api} did not answer ok`);
+    if (health.json.service !== SERVICE_NAME) {
+      throw new Error(`${api} answers as "${health.json.service}", not the ${PRODUCT_NAME} verifier. Is the new server deployed there?`);
+    }
   }
-  const [deployerBnb, saltFee, flags, factoryCode] = await Promise.all([
+  if (createOnly && api && !("open" in state.done)) {
+    // The round names its attester for good: check that the server signs with that very address.
+    const h = await get("/health");
+    const serverAttester = typeof h.json?.attester === "string" ? (h.json.attester as string).toLowerCase() : null;
+    if (!serverAttester) {
+      log(`Note: ${api}/health did not say which address the server signs as; the attester was not checked.`);
+    } else if (serverAttester !== attesterAddress.toLowerCase()) {
+      throw new Error(
+        `the server at ${api} signs as ${serverAttester}, but this round would name ${attesterAddress} as its attester, ` +
+          `so the server could never sign its check-ins. Set ATTESTER_ADDRESS.`,
+      );
+    } else {
+      log(`The server at ${api} signs as ${attesterAddress}, the attester this round will name.`);
+    }
+  }
+  const [deployerBnb, saltFee, flags, factoryCode, head] = await Promise.all([
     client.getBalance({ address: deployer.address }),
     read<bigint>(PORTAL, portalAbi, "SALT_LOCK_FEE"),
     read<bigint>(PORTAL, portalAbi, "featureFlags"),
     client.getCode({ address: FACTORY }),
+    client.getBlock({ blockTag: "latest" }),
   ]);
   if (!factoryCode || factoryCode === "0x") throw new Error(`no contract code at the CheckInLauncherFactory ${FACTORY}`);
   if ((flags & 1n) !== 0n) throw new Error("the testnet Portal has creation paused");
-  if (!("open" in state.done) && deployerBnb < parseEther("0.06")) {
-    throw new Error(`deployer ${deployer.address} needs at least 0.06 test BNB to start a round`);
+  // CREATE_ONLY sends the opening, a test USD mint, an approval and the sponsor transaction; the full
+  // run also pays the members' gas and the launch.
+  const bnbNeeded = createOnly
+    ? saltFee + gasMoney([GAS.newLauncher, GAS.mint, GAS.approve, GAS.sponsor]) + parseEther("0.005")
+    : parseEther("0.06");
+  if (!("open" in state.done)) {
+    if (deployerBnb < bnbNeeded) {
+      throw new Error(`deployer ${deployer.address} needs at least ${formatEther(bnbNeeded)} test BNB to start a round`);
+    }
+    // The factory takes a deadline after the opening block and at most 90 days after it.
+    const chainNow = Number(head.timestamp);
+    if (state.deadline <= chainNow + 60) {
+      throw new Error(`the deadline ${iso(state.deadline)} is not far enough in the future (chain time ${iso(chainNow)})`);
+    }
+    if (state.deadline > chainNow + 90 * 86_400) {
+      throw new Error(`the deadline ${iso(state.deadline)} is more than 90 days after the chain's time ${iso(chainNow)}: the factory refuses it`);
+    }
   }
-  log(`Verifier ${api} is up. Deployer ${deployer.address} holds ${formatEther(deployerBnb)} test BNB.`);
-  log(`Members: ${members.map((m) => `${m.label} ${m.account.address}`).join(", ")}`);
-  log(`Attester (our server): ${attesterAddress}. Deadline: ${new Date(state.deadline * 1000).toISOString()}`);
+  log(`${api ? `Verifier ${api} is up. ` : ""}Deployer ${deployer.address} holds ${formatEther(deployerBnb)} test BNB.`);
+  if (!createOnly) log(`Members: ${members.map((m) => `${m.label} ${m.account.address}`).join(", ")}`);
+  log(`Attester (our server): ${attesterAddress}. Deadline: ${iso(state.deadline)}`);
 
   // ── 1. The deployer opens the round ───────────────────────────────────────
   const opened = await step("open", async () => {
@@ -594,6 +700,86 @@ async function main() {
   const deposit = await read<bigint>(launcher, launcherAbi, "deposit");
   const deadline = Number(await read<bigint>(launcher, launcherAbi, "deadline"));
 
+  /**
+   * Optional sponsor: "auto" tops the shop (the launch pool) up to Flap's floor; a number is the total
+   * the deployer sponsors, so a run stopped after its sponsor transaction never sponsors twice.
+   */
+  const sponsorStep = () =>
+    step("sponsor", async () => {
+      const poolNow = await read<bigint>(launcher, launcherAbi, "poolQuoteNow");
+      const already = await read<bigint>(launcher, launcherAbi, "sponsoredBy", [deployer.address]);
+      const target = sponsorSetting === "auto" ? 0n : usd(sponsorSetting);
+      const amount =
+        sponsorSetting === "auto" ? (poolNow < poolFloor ? poolFloor - poolNow : 0n) : target > already ? target - already : 0n;
+      if (amount === 0n) {
+        const note = already > 0n ? ` (the deployer has already sponsored ${formatEther(already)})` : "";
+        log(`  nothing to sponsor: the pool would get ${formatEther(poolNow)} test USD${note}`);
+        return { amountUsd: "0", tx: null as string | null, poolBeforeUsd: formatEther(poolNow) };
+      }
+      log(`  the pool would get ${formatEther(poolNow)} test USD; the deployer sponsors ${formatEther(amount)}`);
+      if ((await bal(USD, deployer.address)) < amount) {
+        await send("sponsor", `mint ${formatEther(amount)} test USD to the sponsor`, deployer, {
+          to: USD,
+          data: encodeFunctionData({ abi: erc20Abi, functionName: "mint", args: [deployer.address, amount] }),
+          gas: GAS.mint,
+        });
+      }
+      if ((await read<bigint>(USD, erc20Abi, "allowance", [deployer.address, launcher])) < amount) {
+        await send("sponsor", "the sponsor approves the Launcher", deployer, {
+          to: USD,
+          data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [launcher, amount] }),
+          gas: GAS.approve,
+        });
+      }
+      const receipt = await send("sponsor", `CheckInLauncher.sponsor(${formatEther(amount)} test USD): pool only, no share`, deployer, {
+        to: launcher,
+        data: encodeFunctionData({ abi: launcherAbi, functionName: "sponsor", args: [amount] }),
+        gas: GAS.sponsor,
+      });
+      return { amountUsd: formatEther(amount), tx: receipt.transactionHash as string | null, poolBeforeUsd: formatEther(poolNow) };
+    });
+
+  // ── CREATE_ONLY: sponsor, read the round back, stop ───────────────────────
+  // No POST /admin/round (the featured round stays as it is) and no throwaway members.
+  if (createOnly) {
+    const sponsored = await sponsorStep();
+    const created = {
+      launcher,
+      explorer: `${EXPLORER}/address/${launcher}`,
+      name: await read<string>(launcher, launcherAbi, "name"),
+      symbol: await read<string>(launcher, launcherAbi, "symbol"),
+      depositUsd: formatEther(deposit),
+      liquidityBps: Number(await read<bigint>(launcher, launcherAbi, "liquidityBps")),
+      checkInGoal: goal,
+      deadline,
+      deadlineIso: iso(deadline),
+      attester: getAddress(await read<Hex>(launcher, launcherAbi, "attester")),
+      creator: getAddress(await read<Hex>(launcher, launcherAbi, "creator")),
+      memberCount: Number(await read<bigint>(launcher, launcherAbi, "memberCount")),
+      totalSponsoredUsd: formatEther(await read<bigint>(launcher, launcherAbi, "totalSponsored")),
+      shopNowUsd: formatEther(await read<bigint>(launcher, launcherAbi, "poolQuoteNow")),
+      launched: await read<boolean>(launcher, launcherAbi, "launched"),
+      openTx: opened.tx as string,
+      sponsorTx: sponsored.tx,
+      readAt: new Date().toISOString(),
+    };
+    // Read again on every run, so the state file shows the round as it is now.
+    state.done.created = created;
+    save();
+    if (created.attester.toLowerCase() !== attesterAddress.toLowerCase()) {
+      throw new Error(`the round names ${created.attester} as its attester, not ${attesterAddress}`);
+    }
+    log(`CREATE_ONLY: the round is open. The server was NOT pointed at it (no POST /admin/round) and no members were added.`);
+    log(`  ${created.name}: deposit ${created.depositUsd} test USD, liquidityBps ${created.liquidityBps}, goal ${created.checkInGoal}, deadline ${created.deadlineIso}`);
+    log(`  shop money now ${created.shopNowUsd} test USD (sponsored ${created.totalSponsoredUsd}); attester ${created.attester}`);
+    log(`  Launcher: ${launcher}  ${created.explorer}`);
+    log(`  State written to ${stateFile}`);
+    log(`  A Season squad? Add this launcher to the server's SEASON_LAUNCHERS and restart it now: until then the server`);
+    log(`  would sign pre-season check-ins for it, and the app lists it 3 minutes after creation (scripts/README.md, 2).`);
+    console.log(JSON.stringify(created, null, 2));
+    return;
+  }
+
   // ── 2. Point the verifier at the round ────────────────────────────────────
   const pointed = await step("point", async () => {
     let r = await post("/admin/round", { launcher, name: roundName }, true);
@@ -656,36 +842,7 @@ async function main() {
   await apiCheck("joined", launcher);
 
   // ── 4. Optional sponsor: top the launch pool up to Flap's floor ───────────
-  const sponsored = await step("sponsor", async () => {
-    const poolNow = await read<bigint>(launcher, launcherAbi, "poolQuoteNow");
-    const amount = sponsorSetting === "auto" ? (poolNow < poolFloor ? poolFloor - poolNow : 0n) : usd(sponsorSetting);
-    if (amount === 0n) {
-      log(`  no sponsor needed: the pool would get ${formatEther(poolNow)} test USD`);
-      return { amountUsd: "0", tx: null, poolBeforeUsd: formatEther(poolNow) };
-    }
-    log(`  the pool would get ${formatEther(poolNow)} test USD; the deployer sponsors ${formatEther(amount)}`);
-    if ((await bal(USD, deployer.address)) < amount) {
-      await send("sponsor", `mint ${formatEther(amount)} test USD to the sponsor`, deployer, {
-        to: USD,
-        data: encodeFunctionData({ abi: erc20Abi, functionName: "mint", args: [deployer.address, amount] }),
-        gas: GAS.mint,
-      });
-    }
-    if ((await read<bigint>(USD, erc20Abi, "allowance", [deployer.address, launcher])) < amount) {
-      await send("sponsor", "the sponsor approves the Launcher", deployer, {
-        to: USD,
-        data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [launcher, amount] }),
-        gas: GAS.approve,
-      });
-    }
-    const receipt = await send("sponsor", `CheckInLauncher.sponsor(${formatEther(amount)} test USD): pool only, no share`, deployer, {
-      to: launcher,
-      data: encodeFunctionData({ abi: launcherAbi, functionName: "sponsor", args: [amount] }),
-      gas: GAS.sponsor,
-    });
-    return { amountUsd: formatEther(amount), tx: receipt.transactionHash, poolBeforeUsd: formatEther(poolNow) };
-  });
-  void sponsored;
+  await sponsorStep();
   await apiCheck("sponsored", launcher);
 
   // ── 5. Check-ins, one UTC day at a time ───────────────────────────────────

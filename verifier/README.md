@@ -1,8 +1,12 @@
 # Cypher Run verifier
 
-The server side of Cypher Run: a discipline app with money on it. You pay a deposit to
-join and check in every day you move. Everyone's check-ins fill one bar. When it is full, a token
-launches on Flap, and the deposits and the token are shared by how many days each person showed up.
+The server side of Cypher Run, which turns showing up into a community, and a community into a
+launch. A group puts in equal deposits and checks in each day they move; everyone's check-ins fill
+one bar. There are two endings. If the round has not launched by its deadline (the bar never filled,
+the pool was below Flap's floor, or nobody pressed Launch), every wallet takes back 100% of what it
+paid in. If the bar fills and someone presses Launch, the group's own coin launches through Flap's
+Pool Launch, and the piggy bank (the round's `StreakVault`) is split by days shown up, not by
+dollars. BSC testnet and test USD only.
 
 This server does six things (a round is one `CheckInLauncher`):
 
@@ -11,7 +15,8 @@ This server does six things (a round is one `CheckInLauncher`):
   how they are found and listed".
 - **Signs check-ins.** A member reports today's steps; if the report passes the rules below, the
   server answers with the attester's signature, and the member's own wallet sends
-  `CheckInLauncher.checkIn(day, signature)`.
+  `CheckInLauncher.checkIn(day, signature)`. For the rounds of a Season it signs on the Season's
+  days only; see "Seasons".
 - **Remembers the accepted days**, for streaks, per round.
 - **Relays what the chain says** about a round and about one wallet, so the app needs one request
   instead of many reads.
@@ -49,7 +54,8 @@ The attester key is bounded as follows; each point is checked against
 `../contracts/src/CheckInLauncher.sol`, `../contracts/src/StreakVault.sol` and `src/app.ts`.
 
 - **What it can do.** Sign, or refuse to sign, a check-in for a wallet. This server signs for
-  today (UTC) only, and only for a wallet that is a member of the round (`isMember`). On chain,
+  today (UTC) only, only for a wallet that is a member of the round (`isMember`), and, for a round
+  in a Season, only on the Season's days (see "Seasons"). On chain,
   `checkIn(day, signature)` accepts a signature only for the current UTC day or the one before it,
   once per wallet per day, only from a wallet that joined (paid the deposit), only before the launch
   and the deadline, and the wallet itself sends the transaction (`msg.sender` is the member). Since
@@ -59,7 +65,9 @@ The attester key is bounded as follows; each point is checked against
 - **It cannot move funds.** No function of the Launcher or the vault pays out to the attester or
   lets any address withdraw. Test USD leaves the Launcher only to the Flap pool and the vault at
   `launch()`, or back to the wallet that paid it in through `refund()`; the vault pays only through
-  `claim()`.
+  `claim()`. Both are beacon proxies: Flap's Guardian can upgrade their code
+  (`upgradeVaultImplementation` in `CheckInLauncherFactory.sol` and `StreakVaultFactory.sol`). This
+  server's key cannot, and we hold no owner key.
 - **It cannot launch early.** `launch()` reverts until `totalCheckIns >= checkInGoal`, and every
   check-in is a transaction from a member's own wallet. The attester has no launch function of its
   own.
@@ -69,7 +77,7 @@ The attester key is bounded as follows; each point is checked against
 - **It cannot pay anyone who did not deposit.** `daysOf` only grows through `checkIn`, which
   requires `isMember`, which only `join()` sets, and `join()` takes the deposit. `claim()` pays by
   `daysOf`. Sponsors, the creator and the attester receive nothing from the prize, the tokens or the
-  tax in those roles; a refund returns to each wallet only what it paid in.
+  tax in those roles; a refund gives each wallet back only what it paid in.
 
 The same key also writes the `OriginRegistry` (see "Origin announcer"). That value only tells the
 apps which host to send requests to; it holds no funds, and no round reads it.
@@ -134,6 +142,12 @@ against the real contracts").
 | `ORIGIN_HOST` | The public host, when it is fixed: a plain hostname such as `api.example.com` (no scheme, port or path; anything else stops the server at start). Unset: the host is read from `ORIGIN_SOURCE_URL`. |
 | `ORIGIN_SOURCE_URL` | Where the host is read when `ORIGIN_HOST` is not set, default `http://tunnel:20241/quicktunnel` (cloudflared's metrics server, which answers `{"hostname":"<name>.trycloudflare.com"}`). |
 | `ORIGIN_CHECK_SECONDS` | How often the host is checked, default `60` (10 to 3600). |
+| `SEASON_LAUNCHERS` | The Season's rounds (squads): `CheckInLauncher` addresses separated by commas. Check-ins for them are signed on the Season's days only (see "Seasons"). Unset or empty: no Season, no round is gated, and the other `SEASON_*` values are not read. |
+| `SEASON_NAME` | The Season's name as members read it, such as `Season 1` (at most 80 characters). Default `Season`. |
+| `SEASON_START` | The first check-in day, `YYYY-MM-DD`, a UTC day (it starts at 07:00 in Bangkok). Required with `SEASON_LAUNCHERS`. |
+| `SEASON_END` | The last check-in day, included, fewer than 90 days after `SEASON_START`. Required with `SEASON_LAUNCHERS`. |
+| `SEASON_JOIN_UNTIL` | The last day the app offers Join, included, from `SEASON_START` to `SEASON_END`. Passed on to the app only: joining is not gated here, and the contract takes joins until the launch or the deadline. Required with `SEASON_LAUNCHERS`. |
+| `SEASON_SQUAD_SIZE` | The member count at which the app stops offering Join, default `10` (1 to 1000). Passed on to the app only; the contract has no cap. |
 
 None of the four factory variables (`LAUNCHER_FACTORY` to `ROUNDS_REFRESH_SECONDS`) needs to be set for the deployed factory. To make a round the
 featured one on a running server:
@@ -156,7 +170,8 @@ A report is accepted, and the check-in signed, when all of these hold:
 - `steps` is a whole number, at least `MIN_STEPS` (default 1000) and at most 80000;
 - `source` is `healthkit` or `healthconnect`, or `self` when `ALLOW_SELF_REPORTED=true`;
 - the round has not launched and its deadline has not passed;
-- the round's `attester` is this server's key.
+- the round's `attester` is this server's key;
+- for a round in the Season (`SEASON_LAUNCHERS`), today is one of the Season's days (see "Seasons").
 
 One accepted check-in per wallet per day. Asking again on the same day returns the same signature
 (for example when the transaction failed) and keeps the first accepted report. The contract itself
@@ -165,6 +180,76 @@ midnight UTC still works a little later.
 
 **Streak**: consecutive UTC days with an accepted check-in, ending today, or ending yesterday while
 today is still open. A full day without one ends it. `bestStreak` is the longest run in the round.
+
+## Seasons
+
+A Season is one event with one set of dates, made of squads. Each squad is its own round (one
+`CheckInLauncher`: one bar, one piggy bank, one coin), and every squad has the Season's dates, so
+everyone starts on the same day, at 0 days.
+
+**A rule of this server, not of the contract.** `CheckInLauncher` has no start date: it takes a
+check-in on any day from a member's join until the launch or the deadline. So for a launcher listed
+in `SEASON_LAUNCHERS` this server signs **no check-in before `SEASON_START` and none after
+`SEASON_END`**. Days are UTC days, as the contract counts them; a day starts at 07:00 in Bangkok.
+Disclose this rule like the 1,000-step minimum. A member who joins before the start holds a deposit
+at 0 days until then. The refusal comes after the round's own checks (signature, membership,
+launched, deadline) and before anything is stored or signed:
+
+| Status | `error` | `message` (Season 1) |
+| --- | --- | --- |
+| 409 | `season_not_started` | `Season 1 check-ins open Tue 1 Dec (07:00 in Bangkok). Everyone starts at 0.` |
+| 409 | `season_over` | `Season 1 check-ins have ended. The last day was Wed 30 Dec.` |
+
+The app shows the server's `message` as the error, so app builds made before Seasons already say why.
+
+Nothing else changes. A launcher that is not in `SEASON_LAUNCHERS` is not touched (the stage demo
+round keeps working as before), and without `SEASON_LAUNCHERS` the server behaves exactly as it did
+before Seasons. Joining is not gated here: `joinUntil` and `squadSize` are passed on in `season` for
+the app, which stops offering Join after `joinUntil` or at `squadSize` members. A join sent straight
+to the contract still works until the launch or the deadline.
+
+**What the rule cannot do.** It limits only what this server signs. Anyone may launch as soon as the
+bar is full, whatever the Season's last day (a squad of 10 with a goal of 240 can fill on day 24 at
+the earliest), and a round that has launched or passed its deadline answers `round_launched` or
+`round_closed` first. The attester's limits under "Trust" are unchanged.
+
+Season 1, as set on the hosted server once Squad A existed (26 November 2026), then the server
+restarted:
+
+```bash
+SEASON_NAME="Season 1"
+# Squad A; more squads comma-separated as they open. Never the stage demo round.
+SEASON_LAUNCHERS=0xa60e2f022d891dd394415a594c9e33614c019153
+SEASON_START=2026-12-01
+SEASON_END=2026-12-30
+SEASON_JOIN_UNTIL=2026-12-07
+SEASON_SQUAD_SIZE=10
+```
+
+At start the server logs `Season 1: 1 round(s); check-ins signed from Tue 1 Dec to Wed 30 Dec (UTC
+days) only.` A `SEASON_*` value it cannot use stops it at start with an error that names the variable,
+like every other setting, so read the log after the restart. It warns, and keeps running, when other
+`SEASON_*` values are set but `SEASON_LAUNCHERS` is empty (then no round is gated), and when
+`CURRENT_LAUNCHER` is one of the Season's rounds. Quotes around a `SEASON_*` value are removed
+(`docker run --env-file` keeps them). Keep comments on their own lines: that reader also keeps an
+inline `# …` as part of the value. `.env.example` has the six lines, empty, with Season 1's values
+in a comment above them. After the restart, check the Season:
+
+```bash
+curl -s https://<host>/api/rounds/<squad A> | jq -c .season
+# {"name":"Season 1","start":"2026-12-01","end":"2026-12-30","joinUntil":"2026-12-07",
+#  "startDay":20788,"endDay":20817,"joinUntilDay":20794,"day":0,"days":30,"squadSize":10}
+curl -s https://<host>/api/round | jq .season      # the featured stage demo round: null
+```
+
+Never list the stage demo round ("Bangkok Demo Run",
+`0xcF7957Dc48E5c16732331d27E2C2a1b2A9FA5876`) or any other round that is not a Season squad in
+`SEASON_LAUNCHERS`: its check-ins would be refused outside the Season's days. Do not make a Season
+round the featured round (`CURRENT_LAUNCHER` or `POST /admin/round`) while a live demo checks in on
+the featured round: `/checkin` serves the featured round, and before the Season's first day every
+check-in there is refused. For BNB Hack Bangkok, "Bangkok Demo Run" stays the featured round through
+judging, a Season squad is never the demo's backup round, and Season 1 is featured only after
+judging, as the upcoming flagship (join now, check-ins from Tue 1 Dec).
 
 ## API
 
@@ -197,6 +282,7 @@ Routes that read a round answer `503 chain_unavailable` when the chain could not
 | `GET /round`, `GET /me/:address`, `GET /members`, `POST /checkin` | The same four for the featured round. |
 | `GET /stats`, `GET /stats/:address` | Totals across every round, listed or not; with an address, that wallet's own. |
 | `POST /faucet`, `POST /admin/round` | Gas for a new wallet; the operator sets the featured round. |
+| `GET /faucet` | For the operator: how many more wallets the faucet can fund. |
 | `GET /health` | For the operator: the attester, the faucet's wallet and the origin announcer's state. |
 
 ### Signatures
@@ -305,9 +391,10 @@ Two more things decide what is in the list:
     {
       "launcher": "0x378d…", "name": "Demo Day",
       "deposit": "500", "liquidityBps": 3000,
-      "checkInGoal": 5, "totalCheckIns": 4, "memberCount": 6,
+      "checkInGoal": 5, "totalCheckIns": 4, "memberCount": 6, "totalSponsored": "1500",
       "prizeNow": "2100", "poolQuoteNow": "2400",
       "deadline": 1795883661, "launched": false, "token": null, "vault": null,
+      "season": null,
       "state": "open", "featured": true
     }
   ]
@@ -315,7 +402,9 @@ Two more things decide what is in the list:
 ```
 
 Listed rounds only. Every field except `state` and `featured` is the field of the same name in
-`GET /round`, with amounts as decimal strings in whole tokens.
+`GET /round`, with amounts as decimal strings in whole tokens. `totalSponsored` and `season` are
+there so a card can tell a sponsored Season squad (`liquidityBps` 0, sponsor money, a `season`) from
+other rounds without reading each round on its own.
 
 | Field | Meaning |
 | --- | --- |
@@ -394,7 +483,18 @@ The featured round, read from the chain.
   "allowSelfReported": true,
   "attester": "0x…", "attesterReady": true,
   "quoteDecimals": 18,
+  "season": null,
   "raw": { "deposit": "1000000000000000000000", "totalDeposits": "…", "totalSponsored": "…", "poolQuoteNow": "…", "prizeNow": "…" }
+}
+```
+
+For a round in the Season, `season` is an object instead of `null`:
+
+```json
+"season": {
+  "name": "Season 1", "start": "2026-12-01", "end": "2026-12-30", "joinUntil": "2026-12-07",
+  "startDay": 20788, "endDay": 20817, "joinUntilDay": 20794,
+  "day": 0, "days": 30, "squadSize": 10
 }
 ```
 
@@ -402,6 +502,8 @@ The featured round, read from the chain.
 | --- | --- |
 | `name` | The display name given with the round, otherwise the name stored in the Launcher. |
 | `checkInGoal`, `totalCheckIns` | The bar: `launch()` opens when `totalCheckIns >= checkInGoal`. |
+| `memberCount` | Wallets that joined (paid the deposit), those with 0 days included. `totalCheckIns / memberCount` is the average member's days; both numbers freeze at the launch. In a round with `liquidityBps` 0 (the pool is sponsor money only) that launches, a member whose days are at least that average can claim at least the deposit in test USD from the piggy bank: the Keep-Up Guarantee. Coins and tax come on top and are not part of it. |
+| `totalSponsored` | Sponsor money in the round. It goes only to the pool at the launch, and back to each sponsor with `refund()` if the round does not launch. |
 | `poolQuoteNow` | What `launch()` would put in the pool: all sponsor money plus `liquidityBps` of the deposits. Flap's Portal refuses a launch below its own floor (1,500 test USD when this was written); the app should show this number next to that floor. |
 | `prizeNow` | Before the launch: what `launch()` would send to the vault (the rest of the deposits). After it: everything the vault has received so far, the prize plus trading tax. |
 | `token`, `vault`, `flapUrl` | `null` until the launch. `flapUrl` stays `null` unless `FLAP_TOKEN_URL` is set. |
@@ -409,6 +511,7 @@ The featured round, read from the chain.
 | `canLaunch` | The Launcher's own `canLaunch()`: bar full, not launched, before the deadline. It does not know the Portal's floor. |
 | `refundOpen` | The deadline has passed and the round has not launched. |
 | `attesterReady` | This server's key is the round's attester. `false` means check-ins are refused. |
+| `season` | `null` unless the round is in the Season (`SEASON_LAUNCHERS`). `start`, `end` and `joinUntil` are UTC days as `YYYY-MM-DD`, and `startDay`, `endDay` and `joinUntilDay` the same days as the contract numbers them. `day` is today in the Season: `0` before the first day, `1` on it, `days` on the last day, `days + 1` after it; check-ins are signed only while `day` is from 1 to `days`. `joinUntil` and `squadSize` are for the app's Join button; this server does not enforce them. See "Seasons". |
 
 ### `GET /me/:address`
 
@@ -525,6 +628,8 @@ accepted and the same signature is returned again.
 | 409 | `already_checked_in` | Today's check-in is already on chain. |
 | 409 | `round_launched` | The round has launched; check-ins are closed. |
 | 409 | `round_closed` | The round's deadline has passed. |
+| 409 | `season_not_started` | A Season round before the Season's first day. Nothing was stored or signed. See "Seasons". |
+| 409 | `season_over` | A Season round after the Season's last day. Nothing was stored or signed. |
 | 422 | `not_enough_steps` | Fewer than `minSteps`. |
 | 422 | `implausible_steps` | More than 80000. |
 | 422 | `self_report_disabled` | `source: "self"` while `ALLOW_SELF_REPORTED` is not `true`. |
@@ -579,6 +684,25 @@ records include the caller's IP address (see `TRUST_PROXY`).
 
 Budget at the defaults: 200 wallets x 0.03 = 6 test BNB plus gas. Top the faucet's wallet up
 accordingly, or the faucet answers `faucet_empty` long before the cap.
+
+The hosted server at BNB Hack Bangkok runs the faucet from its own wallet,
+`0xaC33dE0fe7C7a2e779A9Ba9C116C1fFe0aCd19f8` (`FAUCET_PRIVATE_KEY`, not the attester's), with
+`FAUCET_DRIP_BNB=0.012` and `FAUCET_PER_IP_PER_HOUR=100`.
+
+### `GET /faucet`
+
+For the operator before a demo. No per-wallet data.
+
+```json
+{ "enabled": true, "wallet": "0x…", "dripWei": "12000000000000000", "reserveWei": "50000000000000000",
+  "perIpPerHour": 100, "funded": 10, "capLeft": 190, "balance": "451916000000000000", "walletsLeft": 33 }
+```
+
+`walletsLeft` is `(balance - 0.05) / drip`, rounded down, and never more than `capLeft`: how many
+more wallets get paid before `faucet_empty` or `cap_reached`. It is an upper bound, since each
+transfer's gas also comes out of the balance. `balance` and `walletsLeft` are `null` when the chain
+cannot be read; `walletsLeft` is `0` when the faucet is off. `scripts/preflight.sh` reads it (and
+falls back to the wallet's balance on a server without it).
 
 ### `POST /admin/round` (admin)
 
@@ -660,6 +784,8 @@ settle and Merkle proofs are gone and answer `404`.
 src/product.ts   PRODUCT_NAME and the texts members sign
 src/attest.ts    the attester's check-in signature (what the contract verifies)
 src/rules.ts     what a daily report must look like (pure)
+src/season.ts    Seasons: the SEASON_* settings, which days a Season round gets check-ins signed,
+                 and the `season` object of the round views (pure)
 src/days.ts      UTC days and streaks (pure)
 src/faucet.ts    faucet amount and limits (pure)
 src/origin.ts    origin announcer: finds the public host, writes it to the OriginRegistry
@@ -683,7 +809,14 @@ test/            vitest: the contracts' signature vector, check-in rules, streak
                  with another attester left out. test/origin.test.ts: the announcer (unchanged
                  host, changed host, pending, dropped and reverted transactions, bad hosts, the
                  source or the RPC down), GET /health and the ORIGIN_* settings.
-                 test/faucet.test.ts also covers FAUCET_* settings and the separate faucet key
+                 test/faucet.test.ts also covers FAUCET_* settings and the separate faucet key.
+                 test/season.test.ts: Season 1's day numbers, SEASON_* parsing and its errors, the
+                 SEASON_* lines of .env.example (empty, and Season 1's values in the comment), the
+                 rule at days 20787, 20788, 20817 and 20818, other launchers untouched, the view.
+                 The Season on the routes: check-ins refused before 1 Dec and after 30 Dec with
+                 nothing stored or signed, other rounds untouched (test/checkin.test.ts); `season`
+                 on /round, /rounds/:launcher and the /rounds items (test/round.test.ts); the
+                 SEASON_* environment (test/config.test.ts)
 test/e2e-fork.ts the full round against the real contracts on a local fork (npm run e2e:fork),
                  including discovery from the factory's event and POST /rounds
 Dockerfile       node:22-slim image, see "Running in Docker"
@@ -700,16 +833,34 @@ Dockerfile       node:22-slim image, see "Running in Docker"
   had created ("Demo Day" featured, "morning movers" open, "Bangkok Showup" launched), and
   `GET /rounds/:launcher`, `.../me/:address` and `.../members` for "Demo Day" equalled `GET /round`,
   `GET /me/:address` and `GET /members`. That copy was not the hosted server. The hosted server
-  has run the multi-round routes since the same day (see `../PROOF.md`). The origin announcer,
-  `GET /health` and the separate faucet key have not run there yet.
-- `POST /rounds` has not been called with a real creator's signature outside the tests and the
-  fork, and `POST /rounds/:launcher/checkin` has not been followed by a real `checkIn` transaction
-  on the real testnet.
-- The faucet has not sent a real transaction with the new amount, nor from a separate
-  `FAUCET_PRIVATE_KEY`.
-- The origin announcer has not sent a real `setOrigin` yet: `origin()` on the registry was still
-  empty when this was written (26 November 2026). Reading `/quicktunnel` from the tunnel container
-  needs cloudflared's metrics server on `0.0.0.0:20241` (`--metrics`, as in
-  `../deploy/docker-compose.yml`); that has not been tried on the server.
+  has run the multi-round routes since the same day (see `../PROOF.md`), and on 26 November 2026 at
+  13:25 UTC its `GET /health` answered `"ok": true` with the attester
+  `0x2f2ab3da0b824f9ca3edd2580443ca0b271efdd7`, the faucet wallet
+  `0xac33de0fe7c7a2e779a9ba9c116c1ffe0acd19f8` and `origin.host` equal to `origin.onChain`.
+- Real check-ins signed by the hosted server have been sent on the real testnet (`../PROOF.md`,
+  rounds 1 and 2, and "Bangkok Demo Run" at 3 of 12), and rounds have been started from the app
+  ("morning movers", and "Night Owls" with the unlisted switch). Which of them went through
+  `POST /rounds` and `POST /rounds/:launcher/checkin` rather than the older single-round routes was
+  not recorded call by call.
+- The faucet runs from its own wallet, `0xaC33dE0fe7C7a2e779A9Ba9C116C1fFe0aCd19f8`
+  (`FAUCET_PRIVATE_KEY`, `FAUCET_DRIP_BNB` 0.012 test BNB at the event): the hosted `GET /health`
+  names it, and on 26 November 2026 at 10:49 UTC its nonce read 6 and its balance 0.4279 test BNB
+  (funded with 0.5). Its payouts were not checked transaction by transaction.
+- The origin announcer has sent a real `setOrigin`: the attester wrote the tunnel host on
+  25 November 2026 at 20:55 UTC
+  ([`0x2919b1d9…1c11e`](https://testnet.bscscan.com/tx/0x2919b1d9b83c28cfc11c203998a2459eb6212893a112e264ea8644312f51c11e)),
+  and on 26 November at 13:25 UTC `origin()` read `reviews-resume-tunes-advisors.trycloudflare.com`,
+  the same host `GET /health` reports. Reading `/quicktunnel` from the tunnel container needs
+  cloudflared's metrics server on `0.0.0.0:20241` (`--metrics`, as in `../deploy/docker-compose.yml`).
 - The address pattern of a token's page on Flap for testnet tokens is not known here, which is why
   `FLAP_TOKEN_URL` has no default.
+- The Season rule (`SEASON_*`) is checked on the fake chain only: refusing a check-in needs the
+  attester key. On 26 November 2026 a local copy of this server with no key started from
+  `.env.example`'s `SEASON_*` lines and read the real BSC testnet: with the lines empty there was no
+  Season and every round's `season` was `null`; with Season 1's values and one existing round
+  ("morning movers") standing in for Squad A, that round carried the Season (`day` 0) and every
+  other round, "Bangkok Demo Run" included, `null`. The rule now runs on the hosted server for Season
+  1 Squad A (`0xa60e2f022d891dd394415a594c9e33614c019153`, created 26 November 2026): at 13:25 UTC
+  `GET /rounds/<Squad A>` carried `season` (name "Season 1", 2026-12-01 to 2026-12-30, joinUntil
+  2026-12-07, squadSize 10, `day` 0) and "Bangkok Demo Run" `null`. A refused check-in (`409`
+  `season_not_started`) on the hosted server was not tried, because Squad A has no members yet.

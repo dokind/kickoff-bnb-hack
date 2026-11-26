@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { appFromEnv } from "../src/config.js";
+import { appFromEnv, serverFromEnv } from "../src/config.js";
 import { recoverMessageAddress } from "viem";
 import { PRODUCT_NAME, SERVICE_NAME, checkInMessage, faucetMessage } from "../src/product.js";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -120,6 +120,61 @@ describe("app built from the environment", () => {
       expect(() => appFromEnv({ ...env, MIN_STEPS: bad })).toThrow(/MIN_STEPS/);
     }
     expect(() => appFromEnv({ ...env, MIN_STEPS: "4000", ALLOW_SELF_REPORTED: "true" })).not.toThrow();
+  });
+});
+
+describe("a Season from the environment (SEASON_*)", () => {
+  // As the deploy sets it for Season 1, with a made-up Squad A address.
+  const SQUAD = "0x5a00000000000000000000000000000000000001";
+  const SEASON = {
+    SEASON_NAME: "Season 1",
+    SEASON_LAUNCHERS: SQUAD,
+    SEASON_START: "2026-12-01",
+    SEASON_END: "2026-12-30",
+    SEASON_JOIN_UNTIL: "2026-12-07",
+    SEASON_SQUAD_SIZE: "10",
+  };
+  const quiet = () => ({
+    log: vi.spyOn(console, "log").mockImplementation(() => undefined),
+    warn: vi.spyOn(console, "warn").mockImplementation(() => undefined),
+  });
+
+  it("without SEASON_* there is no Season and nothing is said about one: the server runs as before", () => {
+    const { log, warn } = quiet();
+    expect(serverFromEnv(env).season).toBeUndefined();
+    expect(log).not.toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("SEASON");
+  });
+
+  it("reads the six values, says so at start, and passes the Season to the app", () => {
+    const { log, warn } = quiet();
+    const server = serverFromEnv({ ...env, ...SEASON });
+    expect(server.season).toEqual({ name: "Season 1", launchers: [SQUAD], startDay: 20788, endDay: 20817, joinUntilDay: 20794, squadSize: 10 });
+    expect(log).toHaveBeenCalledWith("Season 1: 1 round(s); check-ins signed from Tue 1 Dec to Wed 30 Dec (UTC days) only.");
+    expect(warn.mock.calls.flat().join("\n")).not.toContain("SEASON");
+  });
+
+  it("refuses to start with a SEASON_* value it cannot use, and the error names the variable", () => {
+    quiet();
+    const bad: [Record<string, string>, RegExp][] = [
+      [{ SEASON_LAUNCHERS: "0x1234" }, /SEASON_LAUNCHERS/],
+      [{ SEASON_START: "2026-13-01" }, /SEASON_START/],
+      [{ SEASON_END: "2026-11-01" }, /SEASON_END/],
+      [{ SEASON_JOIN_UNTIL: "2027-01-07" }, /SEASON_JOIN_UNTIL/],
+      [{ SEASON_SQUAD_SIZE: "0" }, /SEASON_SQUAD_SIZE/],
+      [{ SEASON_NAME: "n".repeat(81) }, /SEASON_NAME/],
+    ];
+    for (const [over, message] of bad) expect(() => appFromEnv({ ...env, ...SEASON, ...over })).toThrow(message);
+  });
+
+  it("warns when SEASON_* is set without SEASON_LAUNCHERS, and when the featured round is a Season round", () => {
+    const { warn } = quiet();
+    const { SEASON_LAUNCHERS: _, ...rest } = SEASON;
+    expect(serverFromEnv({ ...env, ...rest }).season).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith("SEASON_* is set but SEASON_LAUNCHERS is empty: no round is gated by a Season.");
+    warn.mockClear();
+    serverFromEnv({ ...env, ...SEASON, CURRENT_LAUNCHER: SQUAD.toUpperCase().replace("0X", "0x") });
+    expect(warn).toHaveBeenCalledWith("CURRENT_LAUNCHER is a Season round: the featured round refuses check-ins outside the Season's days.");
   });
 });
 

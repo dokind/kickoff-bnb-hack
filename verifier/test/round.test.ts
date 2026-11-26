@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createAttester } from "../src/attest.js";
+import type { Season } from "../src/season.js";
 import { LAUNCHER, QUOTE, T, TOKEN, USD, VAULT, VECTOR_ATTESTER, freshRound, harness, lower } from "./fakes.js";
 
 const accounts = Array.from({ length: 4 }, () => privateKeyToAccount(generatePrivateKey()));
@@ -54,6 +55,8 @@ describe("GET /round (fake chain)", () => {
       attester: VECTOR_ATTESTER.toLowerCase(),
       attesterReady: true,
       quoteDecimals: 18,
+      // Not a Season round (no SEASON_* in this app).
+      season: null,
       raw: {
         deposit: "1000000000000000000000",
         totalDeposits: "3000000000000000000000",
@@ -248,6 +251,95 @@ describe("GET /me/:address", () => {
     h.chain.joined.add(lower(alice));
     h.chain.refundableOf.set(lower(alice), 1600n * USD);
     expect((await h.get(`/me/${alice.address}`)).body).toMatchObject({ refundable: "1600", raw: { refundable: "1600000000000000000000" } });
+  });
+});
+
+describe("season in the round view (SEASON_*)", () => {
+  // Squad A of Season 1 and one round in no Season, both created by our (fake) factory. The featured
+  // round (LAUNCHER, the stage demo) is in no Season either.
+  const SQUAD = `0x${"5a".padEnd(40, "0")}`;
+  const OTHER = `0x${"0b".padEnd(40, "0")}`;
+  const SEASON_DEADLINE = 1_798_761_599; // 31 Dec 2026 23:59:59 UTC
+  const season: Season = { name: "Season 1", launchers: [SQUAD], startDay: 20788, endDay: 20817, joinUntilDay: 20794, squadSize: 10 };
+  const view = (day: number) => ({
+    name: "Season 1",
+    start: "2026-12-01",
+    end: "2026-12-30",
+    joinUntil: "2026-12-07",
+    startDay: 20788,
+    endDay: 20817,
+    joinUntilDay: 20794,
+    day,
+    days: 30,
+    squadSize: 10,
+  });
+  const item = (body: { rounds: { launcher: string }[] }, launcher: string) => body.rounds.find((r) => r.launcher === launcher) as any;
+
+  let h: ReturnType<typeof harness>;
+  beforeEach(() => {
+    h = harness({ season, adminToken: "s3cret" });
+    h.chain.create(SQUAD, alice.address, T("2026-11-20T00:00:00Z"), {
+      name: "Season 1 Squad A",
+      deposit: 100n * USD,
+      liquidityBps: 0,
+      checkInGoal: 240,
+      deadline: SEASON_DEADLINE,
+      memberCount: 4,
+      totalCheckIns: 0,
+      totalDeposits: 400n * USD,
+      totalSponsored: 1500n * USD,
+      poolQuoteNow: 1500n * USD,
+      prizeNow: 400n * USD,
+    });
+    h.chain.create(OTHER, alice.address, T("2026-11-20T00:00:00Z"));
+  });
+
+  it("GET /rounds/:launcher and the GET /rounds item carry it for a Season round; it is null for the others", async () => {
+    expect((await h.get(`/rounds/${SQUAD}`)).body.season).toEqual(view(0));
+    expect((await h.get(`/rounds/${OTHER}`)).body.season).toBeNull();
+    expect((await h.get(`/rounds/${LAUNCHER}`)).body.season).toBeNull();
+    expect((await h.get("/round")).body.season).toBeNull();
+
+    const list = (await h.get("/rounds")).body;
+    expect(item(list, SQUAD).season).toEqual(view(0));
+    expect(item(list, OTHER).season).toBeNull();
+    expect(item(list, LAUNCHER).season).toBeNull();
+    // What the app needs on a card for the Keep-Up Guarantee and the "you vs the average" line.
+    expect(item(list, SQUAD)).toMatchObject({
+      deposit: "100",
+      liquidityBps: 0,
+      totalSponsored: "1500",
+      poolQuoteNow: "1500",
+      checkInGoal: 240,
+      totalCheckIns: 0,
+      memberCount: 4,
+      deadline: SEASON_DEADLINE,
+      state: "open",
+      featured: false,
+    });
+  });
+
+  it("GET /round, GET /rounds and POST /admin/round carry it when the featured round is a Season round", async () => {
+    const set = await h.post("/admin/round", { launcher: SQUAD }, ADMIN);
+    expect(set.body.season).toEqual(view(0));
+    expect((await h.get("/round")).body.season).toEqual(view(0));
+    expect((await h.get("/rounds")).body.rounds[0]).toMatchObject({ launcher: SQUAD, featured: true, season: view(0) });
+    expect(await h.get(`/rounds/${SQUAD}`)).toEqual({ status: 200, body: { ...(await h.get("/round")).body, unlisted: false } });
+  });
+
+  it("its day follows the server's clock: 0 before 1 Dec, 1 to 30 during the Season, 31 after it", async () => {
+    const cases: [string, number][] = [
+      ["2026-11-30T23:59:59Z", 0],
+      ["2026-12-01T00:00:00Z", 1],
+      ["2026-12-07T12:00:00Z", 7],
+      ["2026-12-30T23:59:59Z", 30],
+      ["2026-12-31T00:00:00Z", 31],
+    ];
+    for (const [at, day] of cases) {
+      h.clock = T(at);
+      expect((await h.get(`/rounds/${SQUAD}`)).body.season.day).toBe(day);
+      expect(item((await h.get("/rounds")).body, SQUAD).season.day).toBe(day);
+    }
   });
 });
 

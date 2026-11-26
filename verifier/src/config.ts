@@ -15,6 +15,7 @@ import {
 } from "./origin.js";
 import { DEFAULT_CHUNK_BLOCKS, createRounds, type Rounds } from "./rounds.js";
 import { DEFAULT_MIN_STEPS, MAX_STEPS } from "./rules.js";
+import { dayLabel, seasonFromEnv, type Season } from "./season.js";
 import { LocalStore } from "./store.js";
 
 /** The key as viem wants it, or an error that names the variable and does not repeat the value. */
@@ -59,6 +60,8 @@ export interface Server {
   origin?: OriginAnnouncer;
   /** The faucet's settings as read from the environment. */
   faucet: { dripWei: bigint; perIpPerHour: number; wallet: string | null };
+  /** The Season read from SEASON_*; undefined without SEASON_LAUNCHERS. */
+  season?: Season;
 }
 
 export const appFromEnv = (env: NodeJS.ProcessEnv = process.env) => serverFromEnv(env).app;
@@ -115,6 +118,20 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
   const allowSelfReported = env.ALLOW_SELF_REPORTED === "true";
   if (allowSelfReported) console.warn("ALLOW_SELF_REPORTED=true: typed-in step counts are accepted. Testnet demo only.");
 
+  // A Season (SEASON_*): one set of dates for the rounds in SEASON_LAUNCHERS. Check-ins for those
+  // rounds are signed on the Season's days only. Without SEASON_LAUNCHERS no round is gated.
+  const season = seasonFromEnv(env);
+  if (season) {
+    console.log(
+      `${season.name}: ${season.launchers.length} round(s); check-ins signed from ${dayLabel(season.startDay)} to ${dayLabel(season.endDay)} (UTC days) only.`,
+    );
+    if (launcher && season.launchers.includes(launcher.toLowerCase())) {
+      console.warn("CURRENT_LAUNCHER is a Season round: the featured round refuses check-ins outside the Season's days.");
+    }
+  } else if (Object.keys(env).some((name) => name.startsWith("SEASON_") && env[name]?.trim())) {
+    console.warn("SEASON_* is set but SEASON_LAUNCHERS is empty: no round is gated by a Season.");
+  }
+
   const faucetEnabled = env.FAUCET_ENABLED === "true";
   if (faucetEnabled && !chain.faucet) {
     console.warn("FAUCET_ENABLED=true but the faucet is off: it needs FAUCET_PRIVATE_KEY or ATTESTER_PRIVATE_KEY.");
@@ -142,6 +159,7 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
     // With the entry point's timer running the list is never this old; without one (tests, another
     // host) GET /rounds scans by itself.
     roundsMaxAgeMs: refreshSeconds * 2000,
+    season,
   });
   // The web app calls this server on its own origin under /api, so the same routes are also served
   // there. A reverse proxy can then pass /api/* through unchanged or strip the prefix; both work.
@@ -151,6 +169,7 @@ export function serverFromEnv(env: NodeJS.ProcessEnv = process.env): Server {
     refreshSeconds,
     origin,
     faucet: { dripWei, perIpPerHour, wallet: chain.faucet?.address ?? null },
+    season,
   };
 }
 

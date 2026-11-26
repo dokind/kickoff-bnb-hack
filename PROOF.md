@@ -7,7 +7,10 @@ Two rounds were opened on 25 November 2026 with the deployed `CheckInLauncherFac
 hosted server, reached then at the Cloudflare quick tunnel host
 `columbus-authentication-spine-cuts.trycloudflare.com` (API under `/api/`). A quick tunnel's host
 changes whenever it restarts; from 26 November the server writes its current host to OriginRegistry.
-When this page was read, `origin()` was still empty (see "Read on 26 Nov 2026"). BSC testnet only (chain 97): test BNB and Flap's free-mint test
+When this page was read, `origin()` was still empty (see "Read on 26 Nov 2026"); it was written
+later the same night, at 20:55 UTC on 25 November (03:55 on 26 November in Bangkok), by the attester in
+[`0x2919b1d9…1c11e`](https://testnet.bscscan.com/tx/0x2919b1d9b83c28cfc11c203998a2459eb6212893a112e264ea8644312f51c11e).
+BSC testnet only (chain 97): test BNB and Flap's free-mint test
 USD. Nothing here has any value.
 
 - **Round 1, "Bangkok Showup": complete.** Three members joined, the bar filled, a member launched
@@ -16,6 +19,14 @@ USD. Nothing here has any value.
 - **Round 2, "Demo Day": open.** It was left with the bar at 2 of 5 on 25 November and set as the
   featured round on the hosted server, for the live demo. On 26 November it stood at 4 of 5 with
   6 members (below).
+- **The refund ending** (the Fall-Short Refund): a round whose bar was full but which never
+  launched, refunded after its deadline: done and checked on 26 November 2026 at 13:22 UTC (20:22
+  in Bangkok), all 9 checks passed. See "Refund on testnet".
+- **Season 1 Squad A**: the first squad of the first sponsored Season, created and sponsored before
+  the Season starts, on 26 November 2026 at 13:13 UTC; not featured. See "Season 1 Squad A".
+
+The two rounds above were default rounds: 30% of each deposit went to the shop (the coin's pool)
+and 70% was prize. Season 1 squads put 0% of the deposits in the shop; a sponsor fills it.
 
 ## Read on 26 Nov 2026
 
@@ -64,7 +75,11 @@ factory and `10000`.
 in [`0x0387d2b0…596098`](https://testnet.bscscan.com/tx/0x0387d2b0e7a84d0a6b72f26d2fdd8ebc4fadd0bfb7620aa7cd231f4498596098)
 (block 144846127, 2026-11-25 19:44:43 UTC, 02:44 on 26 November in Bangkok) by the deployer, status
 success. `announcer()` reads `0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7`, the attester.
-`origin()` reads `""` and `updatedAt()` `0`: the server had not announced a host yet.
+`origin()` reads `""` and `updatedAt()` `0`: the server had not announced a host yet. It was
+written later on 26 November (Bangkok): the attester sent `setOrigin` in
+[`0x2919b1d9…1c11e`](https://testnet.bscscan.com/tx/0x2919b1d9b83c28cfc11c203998a2459eb6212893a112e264ea8644312f51c11e)
+(block 144855576, 2026-11-25 20:55:41 UTC, status success), and on 26 November at 10:40 UTC
+`origin()` read `reviews-resume-tunes-advisors.trycloudflare.com` and `updatedAt()` `1795640141`.
 
 **"Night Owls", created from the app.** The factory's `CheckInLauncherCreated` events name four
 rounds; the fourth is "Night Owls", Launcher `0x45ae23e5e28b4c90ce10f43266a7aa52d05ec608`, created
@@ -82,9 +97,13 @@ test USD (`quoteReceived()`), paid all of it out (`totalQuotePaid()`) and holds 
 table under round 1. "morning movers" (`0x74B9218cC901fa4b295C3B021c246E6f1022915B`, created from
 the app on 25 November at 17:27:37 UTC) has 1 member and 0 of 6 check-ins.
 
-**The attester wallet.** Its nonce reads 9, against 4 when this page was first written. The same
-wallet pays the faucet's gas transfers, so its nonce no longer shows by itself that it touched no
-round. No function of the Launcher or the vault needs the attester as the sender in any case.
+**The attester wallet.** Its nonce read 9 when this section was first read, and 12 on 26 November
+at 10:49 UTC, against 4 when this page was first written. It sends `setOrigin`; the faucet now pays
+from its own wallet, `0xaC33dE0fe7C7a2e779A9Ba9C116C1fFe0aCd19f8` (0.012 test BNB per new wallet,
+nonce 6 at the same time). Which of the attester's later transactions are `setOrigin` and which, if
+any, are faucet payouts from before the faucet had its own key was not checked one by one, so its
+nonce no longer shows by itself that it touched no round. No function of the Launcher or the vault
+needs the attester as the sender in any case.
 
 **Read this first.**
 
@@ -321,6 +340,72 @@ All 14 have status success.
 | 13 | 16:35:13 | 144820910 | Ana | Ana checks in (CheckInLauncher.checkIn, day 20782) | [`0x8dd90b97…945c2e`](https://testnet.bscscan.com/tx/0x8dd90b97132f536974cd6270601167ddb3963fac08b3b04abbe0bac658945c2e) |
 | 14 | 16:35:16 | 144820916 | Ben | Ben checks in (CheckInLauncher.checkIn, day 20782) | [`0xb11356ce…16618d`](https://testnet.bscscan.com/tx/0xb11356cef0d10ee82e89fdd8a488d7ecd8552649511a6fee2a72fd0a8a16618d) |
 
+## Refund on testnet
+
+The Fall-Short Refund, end to end on BSC testnet: a round whose bar was full but which never
+launched paid back, after its deadline, exactly what its one wallet had put in. It was run by
+`scripts/refund-proof.ts` with the deployer key, which was the round's creator, its attester (so
+the hosted server's public list leaves the round out), its only member and its sponsor. It needed no
+server and did not touch the featured round. The check-in was signed by the script with the
+deployer key as that round's attester, not by our server.
+
+| | |
+|---|---|
+| Launcher | [`0xCDA4Fd2CD2Ca192216C64A827a0627e9d5BD092d`](https://testnet.bscscan.com/address/0xCDA4Fd2CD2Ca192216C64A827a0627e9d5BD092d) ("Refund Proof"; unlisted: its attester is the deployer, so the hosted server's public list leaves it out) |
+| Settings | deposit 100 test USD, `liquidityBps` 3000 (30%), goal 1 check-in, deadline `1795699320` = 2026-11-26 13:22:00 UTC (about 10 minutes after opening) |
+| Opened (`Portal.newLauncher`) | [`0x3239cd32a3b382ad7ad347e44a2b95bd1c9ed0a5b1d4da0bd9897bf665b8d023`](https://testnet.bscscan.com/tx/0x3239cd32a3b382ad7ad347e44a2b95bd1c9ed0a5b1d4da0bd9897bf665b8d023) (block 144985481, 13:12:02 UTC) |
+| Test USD for the wallet: mint 150, approve the Launcher | [`0x9331db341dec3fcf56d0d637e873186f966bed22efb3d392ab68467e1be5ccb3`](https://testnet.bscscan.com/tx/0x9331db341dec3fcf56d0d637e873186f966bed22efb3d392ab68467e1be5ccb3), [`0xfde0ffb15bb2c09c177c848e45602a8cd39bf69c8d8f842188e1309632fac115`](https://testnet.bscscan.com/tx/0xfde0ffb15bb2c09c177c848e45602a8cd39bf69c8d8f842188e1309632fac115) |
+| Joined, 100 test USD (`join()`) | [`0x8d8d206e9e71cf8d95a7335643e8a837c67bdc4703bfc377c7432edb984347a7`](https://testnet.bscscan.com/tx/0x8d8d206e9e71cf8d95a7335643e8a837c67bdc4703bfc377c7432edb984347a7) (block 144985504): 1 member, 100 test USD in deposits |
+| Sponsored, 50 test USD (`sponsor`) | [`0x6973f0f6022787ded73843d9ac0416bf0e01b5aef0dd0f76c3f9a17535c1cd8f`](https://testnet.bscscan.com/tx/0x6973f0f6022787ded73843d9ac0416bf0e01b5aef0dd0f76c3f9a17535c1cd8f) (block 144985512): the Launcher held 150 test USD; the shop would get 80 |
+| Checked in: bar 1 of 1, full (`checkIn`) | [`0x1305455ab246349f56bb87f64893af2eb78f3ca583ac358fe4d0a6e2e572676f`](https://testnet.bscscan.com/tx/0x1305455ab246349f56bb87f64893af2eb78f3ca583ac358fe4d0a6e2e572676f) (block 144985521, day 20783 = 2026-11-26), signed by the deployer as this round's attester |
+| `launch()` before the deadline (dry run, nothing sent) | reverts: the shop would hold 80 test USD (50 + 30% of 100), under Flap's 1,500 floor; read at block 144985525: `PortalBelowFloor(80, 1500)` (in test USD), while `canLaunch()` was true |
+| `refund()` before the deadline (dry run, nothing sent) | reverts `RefundUnavailable` (block 144985527, 13:12:23 UTC; refundable 0) |
+| `refund()` after the deadline | [`0x207ed12134a2c3651ea670142b4cc1227feb14af33bf8d6e1bc6d42148ca73b0`](https://testnet.bscscan.com/tx/0x207ed12134a2c3651ea670142b4cc1227feb14af33bf8d6e1bc6d42148ca73b0) (block 144986817, block time 13:22:04 UTC > deadline 13:22:00 UTC): +150 test USD to the wallet, the 100 deposit and the 50 sponsored; `Refunded` event 150; the wallet's test USD 0 → 150, the Launcher's 150 → 0 |
+| Read after the refund | `isMember` false, `refundable` 0; `sponsoredBy` 0, 0 members, 0 in deposits and sponsor money, `launched` false; the wallet's 1 day stays recorded and changed nothing |
+| A second `refund()` (dry run, nothing sent) | reverts `NothingToRefund` |
+
+What it shows: a full bar is not enough. The coin never launched (the shop was under Flap's floor),
+so after the deadline the refund paid back the whole deposit and the sponsor money, and nothing
+else. Days do not change the amount. The record is `scripts/refund-result.json` (git-ignored, on the
+operator's machine): addresses and transaction hashes only, no keys. It holds 9 checks, and all 9
+passed (`"ok": true`); the run started at 13:11:59 UTC and ended at 13:22:08 UTC on 26 November 2026.
+Seven transactions, all with status success.
+
+## Season 1 Squad A
+
+The first squad of Season 1: Show Up 30, our first sponsored Season (see the README). It was created
+with `scripts/run-round.ts` in its create-only mode (`CREATE_ONLY=true`): the script opened the
+round and sponsored its shop, and did not feature it on the server, join it or check in. It is not
+featured before judging: it refuses check-ins until 1 December, and "Bangkok Demo Run" stays the
+stage demo. On testnet we are the sponsor, and no fee is charged.
+
+| | |
+|---|---|
+| Launcher | [`0xA60e2f022D891Dd394415A594c9e33614c019153`](https://testnet.bscscan.com/address/0xA60e2f022D891Dd394415A594c9e33614c019153) |
+| Name | "Season 1 Squad A" |
+| Deposit | 100 test USD |
+| Part of the deposits that seeds the pool (`liquidityBps`) | 0: every deposit is prize |
+| Bar (`checkInGoal`) | 240 (10 members × 30 days × 0.8) |
+| Deadline | `1798761599`: 31 Dec 2026 23:59:59 UTC |
+| Attester | `0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7` (our server) |
+| Opened (`Portal.newLauncher`) | [`0xb502426ef839350ef8337799dadde6acc6da2b3b59d6e72e6f2fb7d69bc74913`](https://testnet.bscscan.com/tx/0xb502426ef839350ef8337799dadde6acc6da2b3b59d6e72e6f2fb7d69bc74913) (block 144985713, 2026-11-26 13:13:47 UTC), by the deployer |
+| Sponsored 1,500 test USD (`sponsor`) | [`0xedcd99ec97a9d4b65b88e0a4343d1ab9df4fd35a9862b021008d62eed06d16f0`](https://testnet.bscscan.com/tx/0xedcd99ec97a9d4b65b88e0a4343d1ab9df4fd35a9862b021008d62eed06d16f0) (block 144985727, 13:13:53 UTC), after a mint [`0xfc480ba89f0acf7e43c99a3190ba9563c7819c5e981383cc714df33f231c3ced`](https://testnet.bscscan.com/tx/0xfc480ba89f0acf7e43c99a3190ba9563c7819c5e981383cc714df33f231c3ced) and an approve [`0x86109e9211591f732fa278a8acd63ee0e5384219f11a31d0bb5831005b7092b7`](https://testnet.bscscan.com/tx/0x86109e9211591f732fa278a8acd63ee0e5384219f11a31d0bb5831005b7092b7) |
+| Token pool if launched now (`poolQuoteNow()`) | 1,500 test USD (`totalSponsored()` 1,500): Flap's floor at our factory's 1x |
+| Members and bar at creation | 0 members, 0 of 240 (`memberCount()` 0, `totalCheckIns()` 0, `launched()` false) |
+| The server's Season rule (`GET /api/rounds/<launcher>`, field `season`) | on: `{"name":"Season 1","start":"2026-12-01","end":"2026-12-30","joinUntil":"2026-12-07","startDay":20788,"endDay":20817,"joinUntilDay":20794,"day":0,"days":30,"squadSize":10}`. The featured "Bangkok Demo Run" reads `"season": null` (3 of 12), unchanged |
+| Featured on the server | no (not before judging) |
+| In the app | [Join Squad A · starts Tue 1 Dec](https://dokind.github.io/kickoff-bnb-hack/#/r/0xa60e2f022d891dd394415a594c9e33614c019153) |
+
+Chain and API read on 26 November 2026 at 13:25 UTC (block 144987264), through the host that
+`origin()` names.
+
+Check-ins open Tue 1 Dec 2026 at 00:00 UTC (07:00 in Bangkok). The bar can fill on 24 Dec at the
+earliest; the deadline is 31 Dec; refunds open on 1 Jan 2027 if it has not launched. Read it again
+with `cast call <launcher> "checkInGoal()(uint256)"`, `"liquidityBps()(uint256)"`,
+`"deadline()(uint256)"` and `"poolQuoteNow()(uint256)"`, each with
+`--rpc-url https://bsc-testnet-rpc.publicnode.com`. The record is `scripts/season1-a-run.json`
+(git-ignored, on the operator's machine).
+
 ## How to repeat or continue
 
 ```sh
@@ -341,10 +426,28 @@ VERIFIER_URL=https://<host>/api STATE_FILE=../scripts/demo-day-run.json ROUND_NA
 # Round 2 again later: on a new UTC day it adds Ana's check-in for that day, and once somebody has
 # launched it does the trading and the claims
 VERIFIER_URL=https://<host>/api STATE_FILE=../scripts/demo-day-run.json npx tsx ../scripts/run-round.ts
+
+# Season 1 Squad A as it was created (create-only: open and sponsor; it does not feature the round).
+# The command of scripts/README.md, section 2; VERIFIER_URL is optional (it only checks GET /health).
+CREATE_ONLY=true ROUND_NAME="Season 1 Squad A" DEPOSIT_USD=100 LIQUIDITY_BPS=0 CHECKIN_GOAL=240 \
+  DEADLINE_AT=2026-12-31T23:59:59Z SPONSOR_USD=1500 \
+  ATTESTER_ADDRESS=0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7 \
+  STATE_FILE=../scripts/season1-a-run.json npx tsx ../scripts/run-round.ts
+
+# The refund proof: a throwaway round; needs no server. After a recorded success it sends nothing
+# unless given --again (a new round); a stopped run continues where it stopped. Its settings are in
+# the header of scripts/refund-proof.ts and in scripts/README.md, section 1.
+npx tsx ../scripts/refund-proof.ts
 ```
 
-The records behind this page are `scripts/round-run.json` and `scripts/round-result.json` (round 1)
-and `scripts/demo-day-run.json` (round 2): addresses and transaction hashes only, no keys.
+Each of these sends transactions on BSC testnet from the deployer key (read from `contracts/.env`,
+never printed).
+
+The records behind this page are `scripts/round-run.json` and `scripts/round-result.json` (round 1),
+`scripts/demo-day-run.json` (round 2), `scripts/refund-result.json` (the refund) and
+`scripts/season1-a-run.json` (Squad A): addresses and transaction hashes only, no keys. They are
+git-ignored, so they stay on the operator's machine and are not in the public repository; this page
+carries what they hold.
 
 ## Not checked
 
@@ -355,7 +458,6 @@ and `scripts/demo-day-run.json` (round 2): addresses and transaction hashes only
 - The outside account that dispatched the tax is assumed to be a Flap service; that was not confirmed.
   If it stops, anyone can call `dispatch()` on the tax processor, and `scripts/run-round.ts` does so
   when it finds money waiting there.
-- `refund()` was not exercised on testnet (it needs a round whose deadline has passed).
 - The Flap page of the round 1 token was opened once in a browser and showed the token, its trades
   and 6 holders. Flap's testnet site is `abc.flap.sh`; the address `flap.sh/bnb-testnet/<token>`
   answers "page not found".

@@ -1,24 +1,35 @@
 # Builds the Android app and attaches it to the "android-latest" release, so
 # https://github.com/dokind/kickoff-bnb-hack/releases/download/android-latest/cypher-run.apk
-# is always the newest build. Runs on every push to main that touches the app, or by hand.
+# is always the newest build. Runs on every push to main that touches app/, or by hand.
 #
-# Testnet build: it is signed with the runner's debug key, so a new build may need the old one
-# uninstalled first. The app finds its server through OriginRegistry on BSC testnet, so no server
-# address is built in.
+# Testnet build. Signing:
+# - If the repo secret ANDROID_DEBUG_KEYSTORE_B64 is set (a base64 debug keystore: store and key
+#   password "android", alias "androiddebugkey"), every build is signed with that same key, so a
+#   newer APK installs over an older one and keeps the wallet stored on the phone.
+# - Without it, the runner makes a fresh debug key each time, and a new build needs the old one
+#   uninstalled first (which deletes the wallet on that phone).
+# The version code is the run number, so each build counts up and Android accepts it as an update.
+#
+# Freeze: set the repo variable APK_FREEZE to "true" and pushes still build but no longer replace
+# the published APK. A run started by hand (workflow_dispatch) always publishes.
+#
+# The app finds its server through OriginRegistry on BSC testnet, so no server address is built in.
 name: Android app
 
 on:
   push:
     branches: [main]
-    paths: ["app/**", ".github/workflows/android.yml"]
+    paths: ["app/**"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Queue runs instead of cancelling them: a run cancelled during the upload step could leave the
+# download link with no file behind it.
 concurrency:
   group: android-apk
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   apk:
@@ -26,6 +37,8 @@ jobs:
     defaults:
       run:
         working-directory: app
+    env:
+      PUBLISH: ${{ github.event_name == 'workflow_dispatch' || vars.APK_FREEZE != 'true' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +46,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - uses: subosito/flutter-action@v2
         with:
@@ -40,24 +54,77 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Use the stable testnet signing key, if one is set
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            dir="${ANDROID_USER_HOME:-$HOME/.android}"
+            mkdir -p "$dir"
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$dir/debug.keystore"
+            echo "SIGNING=stable" >> "$GITHUB_ENV"
+            echo "Signing with the stable testnet key."
+          else
+            echo "SIGNING=throwaway" >> "$GITHUB_ENV"
+            echo "::warning::ANDROID_DEBUG_KEYSTORE_B64 is not set; this APK is signed with a throwaway key and will not install over an older build."
+          fi
+
       - run: flutter pub get
 
       - name: Build the APK
         run: >
           flutter build apk --release
+          --build-name=1.0.0
+          --build-number=${{ github.run_number }}
           --dart-define=CHECKIN_LAUNCHER_FACTORY=0x2A872200B83dD025977d785cDE05356d23eA4153
           --dart-define=STREAK_VAULT_FACTORY=0x0652AAD1d659344f6EdB9572723479aaece144Be
           --dart-define=ATTESTER_ADDRESS=0x2F2ab3dA0b824F9cA3EdD2580443Ca0b271EfDD7
           --dart-define=WEB_BASE_URL=https://dokind.github.io/kickoff-bnb-hack
 
+      - name: Check the signature and write a checksum
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk cypher-run.apk
+          sha256sum cypher-run.apk > cypher-run.apk.sha256
+          cat cypher-run.apk.sha256
+          apksigner="$(find "${ANDROID_HOME:-/nonexistent}/build-tools" -name apksigner -type f 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$apksigner" ] && [ -x "$apksigner" ]; then
+            "$apksigner" verify --print-certs cypher-run.apk | tee signer.txt
+            grep -m1 'certificate SHA-256 digest' signer.txt | sed 's/.*digest: //' > signer-sha256.txt || true
+          else
+            echo "apksigner not found; skipping the signature print."
+          fi
+
+      - name: Keep the APK with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypher-run-apk-${{ github.run_number }}
+          path: |
+            app/cypher-run.apk
+            app/cypher-run.apk.sha256
+          retention-days: 14
+
       - name: Publish to the android-latest release
+        if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk cypher-run.apk
-          if ! gh release view android-latest >/dev/null 2>&1; then
-            gh release create android-latest --prerelease --title "Cypher Run for Android (testnet)" \
-              --notes "Testnet build of Cypher Run for Android 8.0 and later. Test money only, nothing here has real value. Open the file on your phone and allow installing from your browser. Built from ${GITHUB_SHA}."
+          signer="$(cat signer-sha256.txt 2>/dev/null || true)"
+          if [ "$SIGNING" = "stable" ]; then
+            install_note="Newer builds install over this one."
+          else
+            install_note="If an older build is installed, uninstall it first."
           fi
-          gh release upload android-latest cypher-run.apk --clobber
-          gh release edit android-latest --notes "Testnet build of Cypher Run for Android 8.0 and later. Test money only, nothing here has real value. Open the file on your phone and allow installing from your browser. Built from ${GITHUB_SHA}."
+          notes="Testnet build of Cypher Run for Android 8.0 and later. Test money only, nothing here has real value. Open the file on your phone and allow installing from your browser. ${install_note}
+
+          Build ${GITHUB_RUN_NUMBER}, made from ${GITHUB_SHA}.
+          SHA-256 of the file: $(cut -d' ' -f1 cypher-run.apk.sha256)${signer:+
+          Signing certificate SHA-256: ${signer}}"
+          if ! gh release view android-latest >/dev/null 2>&1; then
+            gh release create android-latest --prerelease --title "Cypher Run for Android (testnet)" --notes "$notes"
+          fi
+          gh release upload android-latest cypher-run.apk cypher-run.apk.sha256 --clobber
+          gh release edit android-latest --notes "$notes"
+
+      - name: Say why nothing was published
+        if: env.PUBLISH != 'true'
+        run: echo "APK_FREEZE is true, so the published APK was left as it is. Run this workflow by hand to replace it."

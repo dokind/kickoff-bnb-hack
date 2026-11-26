@@ -4,7 +4,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createApp, type Deps } from "../src/app.js";
 import { createChain } from "../src/chain.js";
 import { dripFromEnv, serverFromEnv } from "../src/config.js";
-import { DRIP_BNB_WEI, GLOBAL_CAP, MIN_BALANCE_WEI, PER_IP_PER_HOUR, RESERVE_WEI, faucetRefusal } from "../src/faucet.js";
+import { DRIP_BNB_WEI, GLOBAL_CAP, MIN_BALANCE_WEI, PER_IP_PER_HOUR, RESERVE_WEI, faucetRefusal, walletsLeft } from "../src/faucet.js";
 import { faucetMessage } from "../src/product.js";
 import { LocalStore } from "../src/store.js";
 import type { FaucetDrip } from "../src/types.js";
@@ -41,6 +41,16 @@ describe("faucet limits (pure)", () => {
     expect(faucetRefusal(recent.slice(1), "0xnew", "1.1.1.1", now)).toBeNull();
     // The oldest one is exactly an hour old a second later.
     expect(faucetRefusal(recent, "0xnew", "1.1.1.1", now + 1)).toBeNull();
+  });
+
+  it("counts the wallets a balance can still fund, keeping the reserve back", () => {
+    const drip = 12n * 10n ** 15n; // 0.012, the live setting
+    expect(walletsLeft(0n, drip)).toBe(0);
+    expect(walletsLeft(drip + RESERVE_WEI - 1n, drip)).toBe(0);
+    expect(walletsLeft(drip + RESERVE_WEI, drip)).toBe(1);
+    // 0.451916 test BNB at 0.012 a wallet: (0.451916 - 0.05) / 0.012 = 33.49, so 33.
+    expect(walletsLeft(451_916n * 10n ** 12n, drip)).toBe(33);
+    expect(walletsLeft(BNB, 0n)).toBe(0);
   });
 
   it("takes another per-IP limit when one is given", () => {
@@ -225,6 +235,43 @@ describe("POST /faucet", () => {
     expect((await ask(alice)).body).toMatchObject({ funded: false, bnbTx: null, reason: "send_failed" });
     failSend = false;
     expect((await ask(alice)).body).toEqual({ funded: true, bnbTx: "0xbnb1" });
+  });
+
+  it("GET /faucet tells the operator how many more wallets it can fund", async () => {
+    const status = async () => (await (await app.request("/faucet")).json()) as Record<string, unknown>;
+    walletBalance = 5n * DRIP_BNB_WEI + RESERVE_WEI + 1n;
+    expect(await status()).toEqual({
+      enabled: true,
+      wallet: "0xfa00000000000000000000000000000000000001",
+      dripWei: DRIP_BNB_WEI.toString(),
+      reserveWei: RESERVE_WEI.toString(),
+      perIpPerHour: PER_IP_PER_HOUR,
+      funded: 0,
+      capLeft: GLOBAL_CAP,
+      balance: walletBalance.toString(),
+      walletsLeft: 5,
+    });
+    // Each payout uses one up, and the count matches what POST /faucet then does.
+    expect((await ask(alice)).body.funded).toBe(true);
+    expect(await status()).toMatchObject({ funded: 1, capLeft: GLOBAL_CAP - 1, walletsLeft: 4 });
+    for (let i = 2; i < 6; i++) expect((await ask(accounts[i]!, `198.51.100.${i}`)).body.funded).toBe(true);
+    expect(await status()).toMatchObject({ funded: 5, walletsLeft: 0 });
+    expect((await ask(bob, "198.51.100.99")).body.reason).toBe("faucet_empty");
+  });
+
+  it("GET /faucet: the total cap limits it too, a chain failure gives null, and off is 0", async () => {
+    const status = async () => (await (await app.request("/faucet")).json()) as Record<string, unknown>;
+    for (let i = 0; i < GLOBAL_CAP - 2; i++) {
+      await store.putFaucetDrip({ address: `0x${(i + 1).toString(16).padStart(40, "0")}`, ip: "10.0.0.1", at: clock - 86_400, bnbTx: "0x1" });
+    }
+    await store.putFaucetDrip({ address: "0x" + "f".repeat(40), ip: "10.0.0.1", at: clock, bnbTx: null, failed: true });
+    expect(await status()).toMatchObject({ funded: GLOBAL_CAP - 2, capLeft: 2, walletsLeft: 2 });
+    chain.faucet!.balance = async () => {
+      throw new Error("rpc down");
+    };
+    expect(await status()).toMatchObject({ balance: null, walletsLeft: null });
+    start({ faucetEnabled: false });
+    expect(await status()).toMatchObject({ enabled: false, wallet: null, balance: null, walletsLeft: 0 });
   });
 
   it("a room on one network: the per-IP limit and the drip come from the settings", async () => {

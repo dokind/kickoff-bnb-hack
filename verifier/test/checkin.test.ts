@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getAddress, recoverMessageAddress } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { checkInInner, createAttester } from "../src/attest.js";
+import { checkInInner, createAttester, type Attester } from "../src/attest.js";
 import { checkInMessage } from "../src/product.js";
 import { DEFAULT_MIN_STEPS, MAX_STEPS, checkReport, parseSteps } from "../src/rules.js";
-import { LAUNCHER, T, VECTOR_ATTESTER, harness, lower } from "./fakes.js";
+import type { Season } from "../src/season.js";
+import { LAUNCHER, T, USD, VECTOR_ATTESTER, VECTOR_KEY, harness, lower } from "./fakes.js";
 
 // Throwaway keys generated per run.
 const alice = privateKeyToAccount(generatePrivateKey());
 const bob = privateKeyToAccount(generatePrivateKey());
+const creator = privateKeyToAccount(generatePrivateKey());
 const TODAY = 20782; // 2026-11-25
 
 describe("report rules (pure)", () => {
@@ -214,5 +216,127 @@ describe("POST /checkin", () => {
     const res = await h.checkIn(alice);
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("no_round");
+  });
+});
+
+describe("POST /checkin for a Season round (SEASON_*)", () => {
+  // Season 1 as planned, with Squad A as our (fake) factory would create it on 26 Nov: 100 test USD
+  // each, 0% of deposits to the shop, 1,500 test USD of sponsor money, a bar of 240, and the
+  // deadline 31 Dec 23:59:59 UTC. The featured round (LAUNCHER, the stage demo) is in no Season.
+  const SQUAD = `0x${"5a".padEnd(40, "0")}`;
+  const OTHER = `0x${"0b".padEnd(40, "0")}`;
+  const SEASON_DEADLINE = 1_798_761_599;
+  const season: Season = { name: "Season 1", launchers: [SQUAD], startDay: 20788, endDay: 20817, joinUntilDay: 20794, squadSize: 10 };
+  const NOT_STARTED = { error: "season_not_started", message: "Season 1 check-ins open Tue 1 Dec (07:00 in Bangkok). Everyone starts at 0." };
+  const OVER = { error: "season_over", message: "Season 1 check-ins have ended. The last day was Wed 30 Dec." };
+
+  let h: ReturnType<typeof harness>;
+  /** Signatures the attester made. */
+  let signed: number;
+
+  beforeEach(() => {
+    const real = createAttester(VECTOR_KEY);
+    signed = 0;
+    const counting: Attester = {
+      address: real.address,
+      signCheckIn: (...args) => {
+        signed++;
+        return real.signCheckIn(...args);
+      },
+    };
+    h = harness({ season, attester: counting });
+    h.chain.create(SQUAD, creator.address, T("2026-11-26T12:00:00Z"), {
+      name: "Season 1 Squad A",
+      deposit: 100n * USD,
+      liquidityBps: 0,
+      checkInGoal: 240,
+      deadline: SEASON_DEADLINE,
+      memberCount: 1,
+      totalDeposits: 100n * USD,
+      totalSponsored: 1500n * USD,
+      poolQuoteNow: 1500n * USD,
+      prizeNow: 100n * USD,
+    });
+    h.chain.join(SQUAD, lower(alice));
+    h.chain.joined.add(lower(alice)); // and a member of the featured round
+  });
+
+  it("signs and stores nothing before the first day, up to 30 Nov 23:59:59 UTC", async () => {
+    for (const at of ["2026-11-26T12:00:00Z", "2026-11-30T23:59:59Z"]) {
+      h.clock = T(at);
+      const res = await h.checkInTo(SQUAD, alice);
+      expect(res).toEqual({ status: 409, body: NOT_STARTED });
+    }
+    expect(signed).toBe(0);
+    expect(await h.store.getCheckIns(SQUAD)).toEqual([]);
+    expect(await h.store.getMembers(SQUAD)).toEqual([]);
+  });
+
+  it("signs from the first second of 1 Dec UTC (07:00 in Bangkok): day 1 of 30", async () => {
+    h.clock = T("2026-12-01T00:00:00Z");
+    const res = await h.checkInTo(SQUAD, alice);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ day: "2026-12-01", dayIndex: 20788, repeat: false });
+    const inner = checkInInner(97, SQUAD, alice.address, 20788);
+    expect(await recoverMessageAddress({ message: { raw: inner }, signature: res.body.attesterSignature })).toBe(VECTOR_ATTESTER);
+    expect(signed).toBe(1);
+    expect(await h.store.getCheckIns(SQUAD)).toMatchObject([{ address: lower(alice), day: "2026-12-01", dayIndex: 20788 }]);
+    expect((await h.get(`/rounds/${SQUAD}`)).body.season).toMatchObject({ day: 1, days: 30 });
+  });
+
+  it("signs on the last day, 30 Dec, to its last second", async () => {
+    h.clock = T("2026-12-30T23:59:59Z");
+    const res = await h.checkInTo(SQUAD, alice);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ day: "2026-12-30", dayIndex: 20817 });
+  });
+
+  it("refuses on 31 Dec with season_over, while the round itself is still open until its deadline", async () => {
+    for (const at of ["2026-12-31T00:00:00Z", "2026-12-31T23:59:59Z"]) {
+      h.clock = T(at);
+      expect(h.clock).toBeLessThanOrEqual(SEASON_DEADLINE);
+      expect(await h.checkInTo(SQUAD, alice)).toEqual({ status: 409, body: OVER });
+    }
+    // After the deadline the round's own rule answers.
+    h.clock = SEASON_DEADLINE + 1;
+    expect((await h.checkInTo(SQUAD, alice)).body.error).toBe("round_closed");
+    expect(signed).toBe(0);
+    expect(await h.store.getCheckIns(SQUAD)).toEqual([]);
+  });
+
+  it("the round's own answers come first: not a member, launched", async () => {
+    h.clock = T("2026-11-28T08:00:00Z");
+    expect((await h.checkInTo(SQUAD, bob)).body.error).toBe("not_a_member");
+    h.chain.rounds.get(SQUAD)!.launched = true;
+    expect((await h.checkInTo(SQUAD, alice)).body.error).toBe("round_launched");
+  });
+
+  it("rounds outside the Season are not touched: the featured round and another round sign on 25 and 30 Nov", async () => {
+    h.chain.create(OTHER, creator.address, T("2026-11-20T00:00:00Z"));
+    h.chain.join(OTHER, lower(alice));
+    for (const at of ["2026-11-25T08:00:00Z", "2026-11-30T23:59:59Z"]) {
+      h.clock = T(at);
+      expect((await h.checkIn(alice)).status).toBe(200);
+      expect((await h.checkInTo(OTHER, alice)).status).toBe(200);
+    }
+    expect(await h.store.getCheckIns(LAUNCHER)).toHaveLength(2);
+    expect(await h.store.getCheckIns(OTHER)).toHaveLength(2);
+    expect(signed).toBe(4);
+    expect((await h.get("/round")).body.season).toBeNull();
+  });
+
+  it("the featured route applies the same rule when the featured round is a Season round", async () => {
+    h.start({ defaultRound: { launcher: SQUAD } });
+    h.clock = T("2026-11-27T08:00:00Z");
+    expect(await h.checkIn(alice, 5000, { signedLauncher: SQUAD })).toEqual({ status: 409, body: NOT_STARTED });
+    h.clock = T("2026-12-02T08:00:00Z");
+    expect((await h.checkIn(alice, 5000, { signedLauncher: SQUAD })).status).toBe(200);
+  });
+
+  it("without SEASON_* the same squad gets check-ins signed on any day, as before", async () => {
+    h.start({ season: undefined });
+    h.clock = T("2026-11-27T08:00:00Z");
+    expect((await h.checkInTo(SQUAD, alice)).status).toBe(200);
+    expect((await h.get(`/rounds/${SQUAD}`)).body.season).toBeNull();
   });
 });

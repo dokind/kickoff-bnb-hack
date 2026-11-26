@@ -41,6 +41,16 @@ export function faucetRefusal(
   return null;
 }
 
+/**
+ * How many more wallets a faucet wallet holding `balance` can fund at `dripWei` each before it
+ * refuses with faucet_empty (it pays only while balance >= drip + RESERVE_WEI). An upper bound: each
+ * transfer's own gas comes out of the same balance.
+ */
+export function walletsLeft(balance: bigint, dripWei: bigint): number {
+  if (dripWei <= 0n || balance < dripWei + RESERVE_WEI) return 0;
+  return Number((balance - RESERVE_WEI) / dripWei);
+}
+
 export const FAUCET_MESSAGES: Record<string, string> = {
   faucet_disabled: "the faucet is switched off on this server",
   already_funded: "this wallet was already funded once",

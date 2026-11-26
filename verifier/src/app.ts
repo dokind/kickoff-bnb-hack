@@ -4,7 +4,8 @@
 // health data, or typed in on the web when that is allowed) and signs the check-in the contract
 // requires. It also remembers the accepted days (for streaks), relays what the chain says about
 // the round, and hands out gas money. It cannot launch early, block a launch, choose who is paid
-// beyond signing daily check-ins, or move funds. Check-ins are attested, not proven.
+// beyond signing daily check-ins, or move funds. Check-ins are attested, not proven. For a round in
+// the Season (SEASON_*, see season.ts) it signs check-ins on the Season's days only.
 //
 // Rounds: every route about a round exists twice. `/rounds/:launcher/...` names the round;
 // `/round`, `/me`, `/members` and `/checkin` are the same routes for the featured round (the one
@@ -16,11 +17,12 @@ import { formatUnits, getAddress, isAddress, recoverMessageAddress } from "viem"
 import type { Attester } from "./attest.js";
 import type { Chain, ClaimState, MemberState, RoundState } from "./chain.js";
 import { dayIndexAt, dayString, streaks } from "./days.js";
-import { DRIP_BNB_WEI, FAUCET_MESSAGES, MIN_BALANCE_WEI, PER_IP_PER_HOUR, RESERVE_WEI, faucetRefusal } from "./faucet.js";
+import { DRIP_BNB_WEI, FAUCET_MESSAGES, GLOBAL_CAP, MIN_BALANCE_WEI, PER_IP_PER_HOUR, RESERVE_WEI, faucetRefusal, walletsLeft } from "./faucet.js";
 import type { OriginHealth } from "./origin.js";
 import { SERVICE_NAME, checkInMessage, faucetMessage, roundMessage } from "./product.js";
 import { LISTING_DELAY_SECONDS, createRounds, type Rounds } from "./rounds.js";
 import { DEFAULT_MIN_STEPS, checkReport, parseSteps } from "./rules.js";
+import { seasonRefusal, seasonView, type Season } from "./season.js";
 import { totals, walletTotals, type Totals, type WalletTotals } from "./stats.js";
 import type { Store } from "./store.js";
 import type { CheckIn, FaucetDrip, RoundRef, Source } from "./types.js";
@@ -77,6 +79,10 @@ export interface Deps {
   /** POST /rounds looks again this many times, this far apart, for a launcher the RPC does not show
    *  yet: the creator's app registers a round right after its creation transaction. */
   registerRetry?: { times: number; waitMs: number };
+  /** SEASON_*: one set of dates for the rounds listed in it. Check-ins for those rounds are signed on
+   *  the Season's days only (a rule of this server; the contract has no start date). Undefined: no
+   *  Season, and no round is gated. */
+  season?: Season;
 }
 
 /** The address (lower-case) that personal_signed `message`, or null if the signature is malformed. */
@@ -125,6 +131,7 @@ export function createApp({
   roundsMaxAgeMs = 20_000,
   roundsWaitMs = 2_500,
   registerRetry = { times: 2, waitMs: 1_500 },
+  season,
 }: Deps) {
   const now = clock ?? (() => Math.floor(Date.now() / 1000));
   /** Milliseconds, for the short-lived memory of GET /rounds. Follows an injected clock. */
@@ -211,6 +218,8 @@ export function createApp({
       // contract would reject every signature from here, so check-ins are refused.
       attesterReady: ourAttester !== null && ourAttester === s.attester,
       quoteDecimals: s.quoteDecimals,
+      // The Season this round is a squad of (its dates, today's day in it, the squad size), or null.
+      season: seasonView(season, ref.launcher, today),
       raw: {
         deposit: s.deposit.toString(),
         totalDeposits: s.totalDeposits.toString(),
@@ -427,12 +436,14 @@ export function createApp({
             checkInGoal: v.checkInGoal,
             totalCheckIns: v.totalCheckIns,
             memberCount: v.memberCount,
+            totalSponsored: v.totalSponsored,
             prizeNow: v.prizeNow,
             poolQuoteNow: v.poolQuoteNow,
             deadline: v.deadline,
             launched: v.launched,
             token: v.token,
             vault: v.vault,
+            season: v.season,
             state: statusOf(s),
             featured: r.featured,
           },
@@ -627,6 +638,11 @@ export function createApp({
     if (round.launched) return err(c, 409, "round_launched", "the round has launched; check-ins are closed");
     if (now() > round.deadline) return err(c, 409, "round_closed", "the round's deadline has passed");
     if (!me.member) return err(c, 403, "not_a_member", "this wallet has not joined the round");
+    // A round in the Season (SEASON_LAUNCHERS) gets no check-in signed before the Season's first day
+    // or after its last one, so everyone starts on the same day at 0 days. A rule of this server:
+    // the contract has no start date. Refused before anything is stored or signed.
+    const outside = seasonRefusal(season, ref.launcher, today);
+    if (outside) return err(c, 409, outside.code, outside.message);
     await remember(ref.launcher, address);
     if (me.checkedIn) return err(c, 409, "already_checked_in", "today's check-in is already on chain");
 
@@ -648,6 +664,35 @@ export function createApp({
   // dollars for the deposit is a step the member takes in the app. Requests are handled one at a
   // time so the limits cannot be raced.
   let faucetQueue: Promise<unknown> = Promise.resolve();
+
+  // For the operator before a demo: how many more wallets the faucet can fund. Nothing secret, no
+  // per-wallet data. `walletsLeft` is the smaller of what the balance covers and the total cap left;
+  // it and `balance` are null when the chain cannot be read.
+  app.get("/faucet", async (c) => {
+    const wallet = chain.faucet;
+    const enabled = faucetEnabled && Boolean(wallet);
+    const funded = (await store.getFaucetDrips()).filter((d) => !d.failed).length;
+    const capLeft = Math.max(0, GLOBAL_CAP - funded);
+    let balance: bigint | null = null;
+    if (enabled) {
+      try {
+        balance = await wallet!.balance();
+      } catch {
+        balance = null;
+      }
+    }
+    return c.json({
+      enabled,
+      wallet: enabled ? wallet!.address : null,
+      dripWei: faucetDripWei.toString(),
+      reserveWei: RESERVE_WEI.toString(),
+      perIpPerHour: faucetPerIpPerHour,
+      funded,
+      capLeft,
+      balance: balance === null ? null : balance.toString(),
+      walletsLeft: !enabled ? 0 : balance === null ? null : Math.min(capLeft, walletsLeft(balance, faucetDripWei)),
+    });
+  });
 
   app.post("/faucet", async (c) => {
     const b = await body(c);

@@ -110,6 +110,7 @@ test/
 ├── RoundBase.sol               shared setup: a mock Portal at the Portal's real address, helpers
 ├── CheckInLauncher.t.sol       every rule and revert of a round, the config vector, the signature vector
 ├── StreakVault.t.sol           claim maths, rounding, the vault factory's checks
+├── KeepUpGuarantee.t.sol       the Keep-Up Guarantee on whole rounds, fuzzed, and the stage numbers
 ├── Salt.t.sol                  pins the salt formula below
 ├── OriginRegistry.t.sol        who may set the origin, empty values, the event
 └── ShowupRound.fork.t.sol      whole rounds against the live testnet Portal
@@ -132,15 +133,19 @@ forge build
 ## Test
 
 ```sh
-forge test               # 69 pass; the fork suite is skipped when BSC_TESTNET_RPC_URL is not set
+forge test --no-match-path 'test/*.fork.t.sol'   # 75 pass, no RPC needed (a few seconds)
 
 export BSC_TESTNET_RPC_URL=https://bsc-testnet-rpc.publicnode.com
-forge test -vv           # 74 tests, including the 5 fork tests (about 30 seconds)
+forge test -vv           # 80 tests, including the 5 fork tests (about 30 seconds)
 ```
 
-Last run, 26 November 2026: 74 passed, 0 failed, 0 skipped with the RPC (44 in
-`CheckInLauncher.t.sol`, 17 in `StreakVault.t.sol`, 6 in `OriginRegistry.t.sol`, 2 in `Salt.t.sol`,
-5 fork tests); 69 passed and the fork suite skipped without it.
+A plain `forge test` also reads `BSC_TESTNET_RPC_URL` from `.env`. When it is not set, the fork suite
+is skipped: 75 passed, 1 skipped.
+
+Last run, 26 November 2026: 80 passed, 0 failed, 0 skipped with the RPC (44 in
+`CheckInLauncher.t.sol`, 17 in `StreakVault.t.sol`, 6 in `KeepUpGuarantee.t.sol`, 6 in
+`OriginRegistry.t.sol`, 2 in `Salt.t.sol`, 5 fork tests); 75 passed and the fork suite skipped
+without it.
 
 The unit tests (`test/CheckInLauncher.t.sol`, `test/StreakVault.t.sol`) need no RPC. They run our
 contracts unchanged against a mock Portal placed at the Portal's real address, which creates the vault
@@ -152,6 +157,20 @@ the floor followed by a sponsor top-up, refunds for members, sponsors and a wall
 only once and never after a launch, claims with unequal days, repeat claims as tax arrives in any
 order, a member with zero days, and rounding (fuzzed: at most 2 wei of each asset is left for three
 members).
+
+`test/KeepUpGuarantee.t.sol` needs no RPC either. It plays whole rounds on the same contracts and mock
+Portal to check the Keep-Up Guarantee. Each random round has 1 to 20 members paying the same deposit
+(1 wei to a billion test USD), 0 to 30 days each, late joiners and 0-day members, a sponsor at or above
+the 1,500 test USD floor, test USD sent straight to the Launcher, and up to 1e30 wei of tax arriving
+between claims; there are 1,024 random rounds per property. Every member whose
+`daysOf × memberCount >= totalCheckIns` (at least the average, both frozen at launch) is paid at least
+`deposit × (10000 − liquidityBps) / 10000` in test USD, both at launch and once all the tax has arrived
+and been claimed: the whole deposit at `liquidityBps` 0 (a sponsored Season), 70% at 3000 (the
+default). The member with the most days is always covered. Coins and tax come on top and are never
+promised. It also pins the numbers said on stage: Season 1 Squad A (10 × 100,
+goal 240, days 6 × 30 + 3 × 20 + 1 × 0) pays 125 / 83.33 / 0 test USD; round 1 at 0% to the shop pays
+1,000 / 500 / 0; and the honest edge, a launch on day 30 before your check-in, leaves you 96.99, under
+the deposit but not under 29/30 of it.
 
 The fork tests (`test/ShowupRound.fork.t.sol`) run against the live Portal with nothing mocked and
 without touching the Portal's settings and without relying on the factory being enabled. The journey:
